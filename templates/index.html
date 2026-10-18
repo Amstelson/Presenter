@@ -49,11 +49,17 @@
   .banner span { flex: 1; min-width: 0; overflow-wrap: anywhere; font-size: 14px; }
 
   main { max-width: 1200px; margin: 0 auto; padding: 16px; }
+  .toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-bottom: 16px; }
+  .toolbar .label { color: var(--muted); font-size: 14px; }
+  .segmented { display: flex; flex: 1; max-width: 480px; min-width: 260px; padding: 3px; gap: 3px;
+    background: var(--panel); border: 1px solid var(--line); border-radius: 12px; }
+  .segmented button { flex: 1; border: 0; background: transparent; padding: 6px 8px; font-size: 14px; }
+  .segmented button.active { background: var(--accent); color: #15120a; font-weight: 600; }
   .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; }
   .card { position: relative; background: var(--panel); border: 2px solid transparent; border-radius: 12px; overflow: hidden; }
   .card.current { border-color: var(--accent); }
   .card .shot { display: block; width: 100%; padding: 0; border: 0; border-radius: 0; background: #000; }
-  .card img { display: block; width: 100%; aspect-ratio: 16 / 9; object-fit: contain; }
+  .card img { display: block; width: 100%; aspect-ratio: var(--frame, 16 / 9); object-fit: contain; }
   .badge {
     display: none; position: absolute; top: 6px; left: 6px; padding: 2px 8px; border-radius: 999px;
     background: var(--accent); color: #15120a; font-size: 12px; font-weight: 600;
@@ -105,6 +111,14 @@
 </header>
 
 <main>
+  <div class="toolbar">
+    <span class="label">Screen format</span>
+    <div class="segmented" id="formats">
+      {% for name, label, ratio in formats %}
+      <button data-format="{{ name }}" data-ratio="{{ ratio or '' }}">{{ label }}</button>
+      {% endfor %}
+    </div>
+  </div>
   <div class="grid" id="grid"></div>
   <p class="empty" id="empty">No images yet. Tap Upload (or drop files here) to add some.</p>
 </main>
@@ -165,7 +179,7 @@
 
   async function refreshStatus() {
     try { state = await api("GET", "/api/status"); }
-    catch (e) { state = { offline: true, error: e.message }; }
+    catch (e) { state = { offline: true, error: e.message, format: state.format }; }
     renderStatus();
   }
 
@@ -193,6 +207,11 @@
     $("pause-label").textContent = state.paused ? "Play" : "Pause";
     $("pause-btn").disabled = mode === "offline";
     $("prev-btn").disabled = $("next-btn").disabled = mode === "offline" || mode === "pinned";
+    // Thumbnails take the shape of the current screen format, as a preview of the screen.
+    document.querySelectorAll("#formats button").forEach((b) => {
+      b.classList.toggle("active", b.dataset.format === state.format);
+      if (b.dataset.format === state.format) $("grid").style.setProperty("--frame", b.dataset.ratio || "16 / 9");
+    });
     document.querySelectorAll(".card").forEach((card) =>
       card.classList.toggle("current", !state.offline && card.dataset.name === state.current));
   }
@@ -243,6 +262,9 @@
   $("next-btn").onclick = () => act("/api/player/next");
   $("pause-btn").onclick = () => act(state.paused ? "/api/player/play" : "/api/player/pause");
   $("resume-btn").onclick = () => act("/api/resume");
+  document.querySelectorAll("#formats button").forEach((b) => {
+    b.onclick = () => act(`/api/format/${b.dataset.format}`);
+  });
   $("upload-btn").onclick = () => $("file-input").click();
   $("file-input").onchange = (e) => { upload(e.target.files); e.target.value = ""; };
 

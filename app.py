@@ -32,6 +32,15 @@ MIN_FREE_MB = 500  # refuse uploads when the SD card gets this full
 EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".gif"}
 THUMB_DIR = os.path.expanduser("~/.cache/presenter/thumbs")
 THUMB_SIZE = 400
+# Screen formats for the switch on the web page: name -> (button label, picture size).
+# Only the shape counts: mpv fits that picture area into whatever resolution the Pi
+# outputs, black around it. With a 2048x1080 (DCI 2K) output the areas are exact.
+FORMATS = {
+    "full": ("Full screen", None),  # use the whole output
+    "flat": ("Flat 1.85", (1998, 1080)),  # DCI Flat
+    "scope": ("Scope 2.39", (2048, 858)),  # DCI Scope
+}
+MPV_CONF = os.path.expanduser("~/.config/presenter/mpv.conf")  # mpv reads it at start
 
 app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = MAX_UPLOAD_MB * 1024 * 1024
@@ -114,6 +123,27 @@ def reload_playlist(start=None):
     mpv(["loadfile", paths[0], "replace"], *(["loadfile", p, "append"] for p in paths[1:]))
 
 
+def format_filter(name):
+    """mpv video filter for a screen format: shrink huge images, pad to the format's shape."""
+    size = FORMATS[name][1]
+    if size is None:
+        return "scale=w=[min(iw,3840)]:h=[min(ih,2160)]:force_original_aspect_ratio=decrease"
+    ratio = size[0] / size[1]
+    # Keep the padded frame under the Pi 4 GPU limit of 4096 px.
+    box_w, box_h = min(3840, int(3840 * ratio)), min(3840, int(3840 / ratio))
+    return (f"scale=w=[min(iw,{box_w})]:h=[min(ih,{box_h})]:force_original_aspect_ratio=decrease,"
+            f"pad=w=[ceil(max(iw,ih*{ratio:.4f})/2)*2]:h=[ceil(max(ih,iw/{ratio:.4f})/2)*2]:x=-1:y=-1")
+
+
+def current_format():
+    with suppress(OSError):
+        with open(MPV_CONF) as f:
+            found = re.search(r"format: (\w+)", f.read())
+        if found and found.group(1) in FORMATS:
+            return found.group(1)
+    return "full"
+
+
 def save_upload(file):
     base, ext = os.path.splitext(file.filename)
     base, ext = secure_filename(base) or "image", ext.lower()
@@ -153,7 +183,8 @@ def too_large(e):
 
 @app.get("/")
 def index():
-    return render_template("index.html", max_upload_mb=MAX_UPLOAD_MB)
+    formats = [(n, label, size[0] / size[1] if size else None) for n, (label, size) in FORMATS.items()]
+    return render_template("index.html", max_upload_mb=MAX_UPLOAD_MB, formats=formats)
 
 
 @app.get("/api/images")
@@ -163,7 +194,24 @@ def images():
 
 @app.get("/api/status")
 def status():
-    return jsonify(player_state())
+    return jsonify({**player_state(), "format": current_format()})
+
+
+@app.post("/api/format/<name>")
+def set_format(name):
+    if name not in FORMATS:
+        abort(404)
+    vf = format_filter(name)
+    os.makedirs(os.path.dirname(MPV_CONF), exist_ok=True)
+    tmp = MPV_CONF + ".tmp"
+    with open(tmp, "w") as f:  # write and swap, so a power cut never leaves half a file
+        f.write(f"# Screen format chosen on the Presenter page, format: {name}\nvf={vf}\n")
+        f.flush()
+        os.fsync(f.fileno())
+    os.replace(tmp, MPV_CONF)
+    with suppress(MpvError):  # if mpv is down it reads the file when it starts
+        mpv(["set_property", "vf", vf])
+    return jsonify(ok=True)
 
 
 PLAYER_ACTIONS = {

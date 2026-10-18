@@ -8,21 +8,24 @@ import importlib
 import io
 import os
 import shutil
+import socket
 import subprocess
 import sys
 import time
+from contextlib import suppress
 
 import pytest
 from PIL import Image
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, REPO)
 
 NAMES = ["a.jpg", "B.png", "slide2.jpg", "slide10.jpg"]
 AUTH = {"Authorization": "Basic " + base64.b64encode(b"tester:secret").decode()}
 POST = {**AUTH, "X-Requested-With": "presenter"}
 
 
-def make_image(fmt="JPEG", size=(64, 36)):
+def make_image(fmt="JPEG", size=(640, 360)):
     buf = io.BytesIO()
     Image.new("RGB", size, (200, 30, 30)).save(buf, fmt)
     return buf.getvalue()
@@ -40,18 +43,35 @@ def env(tmp_path_factory):
     (slides / "notes.txt").write_text("not an image")
     os.environ.update(PRESENTER_SLIDES=str(slides), PRESENTER_SOCKET=sock,
                       PRESENTER_USER="tester", PRESENTER_PASSWORD="secret", HOME=str(root))
-    player = subprocess.Popen(
-        ["mpv", "--vo=null", "--no-audio", "--idle=yes", "--no-terminal", "--loop-playlist=inf",
-         "--image-display-duration=300", f"--input-ipc-server={sock}", str(slides)])
-    for _ in range(50):
-        if os.path.exists(sock):
-            break
-        time.sleep(0.1)
     import app as app_module
     app_module = importlib.reload(app_module)  # pick up the settings above
+    # Same options as the systemd service, minus the screen.
+    player = Player(["mpv", "--vo=null", "--no-audio", "--idle=yes", "--no-terminal",
+                     "--loop-playlist=inf", "--image-display-duration=300",
+                     f"--input-ipc-server={sock}", f"--vf={app_module.format_filter('full')}",
+                     f"--include={app_module.MPV_CONF}", str(slides)], sock)
     yield app_module, app_module.app.test_client(), slides, player
-    player.terminate()
-    player.wait()
+    player.stop()
+
+
+class Player:
+    """The headless mpv under test."""
+
+    def __init__(self, args, sock):
+        self.args, self.sock = args, sock
+        self.start()
+
+    def start(self):
+        self.proc = subprocess.Popen(self.args)
+        for _ in range(50):  # wait until mpv accepts connections
+            with suppress(OSError), socket.socket(socket.AF_UNIX) as s:
+                s.connect(self.sock)
+                return
+            time.sleep(0.1)
+
+    def stop(self):
+        self.proc.terminate()
+        self.proc.wait()
 
 
 def wait_for(client, **expected):
@@ -103,6 +123,55 @@ def test_pause_and_play(env):
     wait_for(client, paused=True)
     client.post("/api/player/play", headers=POST)
     wait_for(client, paused=False)
+
+
+def wait_ratio(app, expected):
+    """Wait until the frame mpv draws (after the format filter) has this shape."""
+    params = None
+    for _ in range(40):
+        params = app.mpv(["get_property", "video-out-params"])[0]
+        if params and abs(params["w"] / params["h"] - expected) < 0.01:
+            return params
+        time.sleep(0.1)
+    raise AssertionError(f"frame {params} never reached ratio {expected:.3f}")
+
+
+def test_screen_formats(env):
+    app, client, _, _ = env
+    client.post("/api/show/a.jpg", headers=POST)
+    wait_for(client, current="a.jpg")
+    for name, ratio in [("scope", 2048 / 858), ("flat", 1998 / 1080), ("full", 640 / 360)]:
+        assert client.post(f"/api/format/{name}", headers=POST).status_code == 200
+        assert client.get("/api/status", headers=AUTH).get_json()["format"] == name
+        wait_ratio(app, ratio)
+    assert client.post("/api/format/imax", headers=POST).status_code == 404
+
+
+def test_scope_keeps_huge_images_under_gpu_limit(env, tmp_path):
+    app, client, _, _ = env
+    big = tmp_path / "huge.jpg"
+    Image.new("RGB", (6000, 4000), (0, 0, 0)).save(big)
+    client.post("/api/format/scope", headers=POST)
+    app.mpv(["loadfile", str(big), "replace"])
+    assert wait_ratio(app, 2048 / 858)["w"] <= 3840
+    client.post("/api/format/full", headers=POST)
+    client.post("/api/resume", headers=POST)
+
+
+def test_format_survives_player_restart(env):
+    app, client, _, player = env
+    client.post("/api/format/scope", headers=POST)
+    player.stop()
+    player.start()  # like systemd restarting mpv, or a reboot
+    wait_ratio(app, 2048 / 858)
+    assert client.get("/api/status", headers=AUTH).get_json()["format"] == "scope"
+    client.post("/api/format/full", headers=POST)
+
+
+def test_service_default_matches_full_format(env):
+    app = env[0]
+    with open(os.path.join(REPO, "systemd", "presenter-mpv.service")) as f:
+        assert f"--vf={app.format_filter('full')} \\" in f.read()
 
 
 def test_pin_and_resume(env):
@@ -187,8 +256,7 @@ def test_thumbnail(env):
 
 def test_player_down_is_reported_but_files_still_work(env):
     app, client, _, player = env
-    player.terminate()
-    player.wait()
+    player.stop()
     res = client.get("/api/status", headers=AUTH)
     assert res.status_code == 503 and "not running" in res.get_json()["error"]
     assert client.get("/api/images", headers=AUTH).status_code == 200

@@ -16,6 +16,7 @@ The web page lets staff:
 - see thumbnails of all images and tap one to show it now
 - pause and play, or go to the next or previous image
 - use **Only this** to show one image until told otherwise, and **Resume slideshow** to go back to the full loop
+- switch the screen format between **Full screen**, **DCI Flat** (1.85:1) and **DCI Scope** (2.39:1)
 - upload images (JPG, PNG, WebP, GIF, up to 50 MB each) and delete them
 
 It works offline on the LAN (no CDN, no internet needed) and is protected by a username and password.
@@ -91,6 +92,29 @@ mpv needs the screen, so it cannot start before the desktop does. The autostart 
 
 After a power cut the Pi boots, logs into the desktop and both services come back on their own. The web app also copes with mpv restarting: it opens a fresh socket connection for every action.
 
+## Screen format: DCI Flat and Scope
+
+The **Screen format** switch at the top of the page decides where the picture goes in the Pi's video output:
+
+| Format | Picture area | In a 2048x1080 (DCI 2K) output | In a 1920x1080 output |
+|---|---|---|---|
+| Full screen | the whole output | 2048x1080 | 1920x1080 |
+| Flat 1.85 | 1.85:1, centered, black around it | 1998x1080, 25 px black left and right | 1920x1038 |
+| Scope 2.39 | 2.39:1, centered, black around it | 2048x858, 111 px black top and bottom | 1920x804 |
+
+- Each image is fitted inside the picture area without cropping or stretching. A 16:9 slide in Scope gets black bars at its sides. Make slides in the shape of the format for a full picture: 1998x1080 for Flat and 2048x858 for Scope (or 3996x2160 and 4096x1716 for 4K).
+- The thumbnails on the page take the shape of the current format, so they show how each slide will sit on the screen.
+- The switch takes effect immediately, even when paused or in "Only this" mode. It is remembered across mpv restarts and reboots (it is stored in `~/.config/presenter/mpv.conf`, which mpv reads when it starts).
+- The switch only changes the Pi's picture. Select the matching format on the projector (lens, masking) as usual.
+
+**Getting exact DCI frames.** The areas are pixel exact when the Pi sends a **2048x1080** signal (the DCI 2K container). This is what a digital cinema projector uses for DCPs. Whether 2048x1080 is offered depends on what the projector or cinema server tells the Pi it accepts:
+
+- Check the modes on offer in a terminal on the Pi's desktop with `wlr-randr` (Wayland) or `xrandr` (X11).
+- If 2048x1080 is listed, select it in the desktop's screen settings (Screen Configuration). The desktop remembers it across reboots.
+- With a 1920x1080 signal the shapes are still correct, just slightly smaller (see the table). In that case the projector's own scaling for that input decides the final size on screen. If the projector already stretches its HDMI input to fill the flat frame, use **Full screen** for flat.
+
+To change the shapes or labels, or to add more formats, edit `FORMATS` at the top of `app.py`.
+
 ## Finding the Pi's address
 
 On the Pi, run:
@@ -136,7 +160,7 @@ The same defaults are at the top of `app.py`, along with the upload limit (`MAX_
 
 ### 1. Automated tests (any Debian or Ubuntu machine, about 2 minutes)
 
-The tests start a real mpv without a screen (`--vo=null`) and drive every button through the web API. They cover login, the cross-site request block, next/prev/pause, "only this", resume, upload (filename cleanup, wrong file types, size limit), delete, thumbnails, and mpv being down.
+The tests start a real mpv without a screen (`--vo=null`) and drive every button through the web API. They cover login, the cross-site request block, next/prev/pause, "only this", resume, upload (filename cleanup, wrong file types, size limit), delete, thumbnails, the Flat and Scope frames (also after an mpv restart), and mpv being down.
 
 ```sh
 sudo apt install mpv python3-flask python3-pil python3-pytest
@@ -163,6 +187,7 @@ Checklist (use the same one on the Pi):
 - [ ] After a reboot the slideshow comes up fullscreen without any clicks.
 - [ ] Previous / Pause / Play / Next, tapping a thumbnail, Only this and Resume slideshow all change the screen within a second.
 - [ ] Upload from a phone (several files at once) and delete work. A `.txt` file and a file over 50 MB are refused.
+- [ ] Flat and Scope put the picture in the right frame, and the choice is still active after a reboot.
 - [ ] Two phones at once stay in sync (the page refreshes every few seconds).
 - [ ] `pkill mpv`: the slideshow is back in about 3 seconds.
 - [ ] `pkill -f presenter/app.py`: the page works again in about 3 seconds.

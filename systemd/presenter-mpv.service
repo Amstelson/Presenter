@@ -10,14 +10,17 @@ StartLimitBurst=10
 # Defaults, can be overridden in ~/.config/presenter.env
 Environment=PRESENTER_SLIDES=%h/slides PRESENTER_SOCKET=/tmp/mpv.sock PRESENTER_DURATION=10
 EnvironmentFile=-%h/.config/presenter.env
-ExecStartPre=/usr/bin/mkdir -p ${PRESENTER_SLIDES}
+ExecStartPre=/usr/bin/mkdir -p ${PRESENTER_SLIDES} %h/.config/presenter
+ExecStartPre=/usr/bin/touch %h/.config/presenter/mpv.conf
 # --idle/--force-window: keep a black fullscreen window even with no images
 # --vf=scale...: shrink huge images to fit the Pi 4 GPU texture limit (4096 px)
+# --include: the screen format (Flat/Scope) picked on the web page, replaces --vf
 ExecStart=/usr/bin/mpv --fs --idle=yes --force-window=yes \
     --loop-playlist=inf --image-display-duration=${PRESENTER_DURATION} \
     --input-ipc-server=${PRESENTER_SOCKET} \
     --no-osc --osd-level=0 --cursor-autohide=always --no-audio --no-terminal \
     --vf=scale=w=[min(iw,3840)]:h=[min(ih,2160)]:force_original_aspect_ratio=decrease \
+    --include=%h/.config/presenter/mpv.conf \
     ${PRESENTER_SLIDES}
 Restart=always
 RestartSec=3
