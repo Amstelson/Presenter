@@ -32,21 +32,21 @@ MIN_FREE_MB = 500  # refuse uploads when the SD card gets this full
 EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".gif"}
 THUMB_DIR = os.path.expanduser("~/.cache/presenter/thumbs")
 THUMB_SIZE = 400
-# Screen formats for the switch on the web page: name -> (button label, picture size).
-# Only the shape counts: mpv fits that picture area into whatever resolution the Pi
-# outputs, black around it. With a 2048x1080 (DCI 2K) output the areas are exact.
-FORMATS = {
-    "full": ("Full screen", None),  # use the whole output
-    "flat": ("Flat 1.85", (1998, 1080)),  # DCI Flat
-    "scope": ("Scope 2.39", (2048, 858)),  # DCI Scope
-}
-MPV_CONF = os.path.expanduser("~/.config/presenter/mpv.conf")  # mpv reads it at start
+# One slides subfolder per screen format: name -> (label, picture width / height).
+# The mpv framing for each format is in mpv/formats.conf.
+FORMATS = {"flat": ("Flat", 1998 / 1080), "scope": ("Scope", 2048 / 858)}
+# The format of this Pi's screen. Only that folder is played, the other is just stored.
+FORMAT = os.environ.get("PRESENTER_FORMAT", "flat")
+if FORMAT not in FORMATS:
+    raise SystemExit(f"PRESENTER_FORMAT must be one of: {', '.join(FORMATS)}")
+PLAY_DIR = os.path.join(SLIDES_DIR, FORMAT)
 
 app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = MAX_UPLOAD_MB * 1024 * 1024
 thumb_slots = threading.Semaphore(2)  # limit parallel thumbnail work to save RAM
-os.makedirs(SLIDES_DIR, exist_ok=True)
-os.makedirs(THUMB_DIR, exist_ok=True)
+for fmt in FORMATS:
+    os.makedirs(os.path.join(SLIDES_DIR, fmt), exist_ok=True)
+    os.makedirs(os.path.join(THUMB_DIR, fmt), exist_ok=True)
 
 
 class MpvError(Exception):
@@ -99,61 +99,41 @@ def natural_key(name):
     return [int(t) if t.isdigit() else t for t in re.split(r"(\d+)", name.lower())]
 
 
-def list_images():
-    """Images in the slides folder as {name: mtime}, in slideshow order."""
-    with os.scandir(SLIDES_DIR) as entries:
+def list_images(folder):
+    """Images in a format folder as {name: mtime}, in slideshow order."""
+    with os.scandir(os.path.join(SLIDES_DIR, folder)) as entries:
         found = {e.name: int(e.stat().st_mtime) for e in entries if e.is_file()
                  and not e.name.startswith(".") and os.path.splitext(e.name)[1].lower() in EXTENSIONS}
     return {n: found[n] for n in sorted(found, key=natural_key)}
 
 
-def image_path(name):
-    if name not in list_images():  # also blocks any path tricks like "../"
+def image_path(folder, name):
+    if folder not in FORMATS or name not in list_images(folder):  # also blocks "../" tricks
         abort(404)
-    return os.path.join(SLIDES_DIR, name)
+    return os.path.join(SLIDES_DIR, folder, name)
 
 
 def reload_playlist(start=None):
-    """Load every image in the folder as the playlist, starting at `start`."""
-    names = list(list_images())
+    """Load every image in this screen's folder as the playlist, starting at `start`."""
+    names = list(list_images(FORMAT))
     if not names:
         return mpv(["stop"])
     i = names.index(start) if start in names else 0
-    paths = [os.path.join(SLIDES_DIR, n) for n in names[i:] + names[:i]]
+    paths = [os.path.join(PLAY_DIR, n) for n in names[i:] + names[:i]]
     mpv(["loadfile", paths[0], "replace"], *(["loadfile", p, "append"] for p in paths[1:]))
 
 
-def format_filter(name):
-    """mpv video filter for a screen format: shrink huge images, pad to the format's shape."""
-    size = FORMATS[name][1]
-    if size is None:
-        return "scale=w=[min(iw,3840)]:h=[min(ih,2160)]:force_original_aspect_ratio=decrease"
-    ratio = size[0] / size[1]
-    # Keep the padded frame under the Pi 4 GPU limit of 4096 px.
-    box_w, box_h = min(3840, int(3840 * ratio)), min(3840, int(3840 / ratio))
-    return (f"scale=w=[min(iw,{box_w})]:h=[min(ih,{box_h})]:force_original_aspect_ratio=decrease,"
-            f"pad=w=[ceil(max(iw,ih*{ratio:.4f})/2)*2]:h=[ceil(max(ih,iw/{ratio:.4f})/2)*2]:x=-1:y=-1")
-
-
-def current_format():
-    with suppress(OSError):
-        with open(MPV_CONF) as f:
-            found = re.search(r"format: (\w+)", f.read())
-        if found and found.group(1) in FORMATS:
-            return found.group(1)
-    return "full"
-
-
-def save_upload(file):
+def save_upload(file, folder):
+    folder_dir = os.path.join(SLIDES_DIR, folder)
     base, ext = os.path.splitext(file.filename)
     base, ext = secure_filename(base) or "image", ext.lower()
     name, n = base + ext, 1
-    while os.path.exists(os.path.join(SLIDES_DIR, name)):
+    while os.path.exists(os.path.join(folder_dir, name)):
         name, n = f"{base}-{n}{ext}", n + 1
-    tmp = os.path.join(SLIDES_DIR, f".{name}.part")  # hidden until complete
+    tmp = os.path.join(folder_dir, f".{name}.part")  # hidden until complete
     try:
         file.save(tmp)
-        os.replace(tmp, os.path.join(SLIDES_DIR, name))
+        os.replace(tmp, os.path.join(folder_dir, name))
     finally:  # no half-written leftovers if the disk fills up
         with suppress(FileNotFoundError):
             os.remove(tmp)
@@ -183,35 +163,20 @@ def too_large(e):
 
 @app.get("/")
 def index():
-    formats = [(n, label, size[0] / size[1] if size else None) for n, (label, size) in FORMATS.items()]
-    return render_template("index.html", max_upload_mb=MAX_UPLOAD_MB, formats=formats)
+    formats = [(n, label, ratio) for n, (label, ratio) in FORMATS.items()]
+    return render_template("index.html", max_upload_mb=MAX_UPLOAD_MB, formats=formats,
+                           on_screen=FORMAT)
 
 
 @app.get("/api/images")
 def images():
-    return jsonify([{"name": n, "mtime": t} for n, t in list_images().items()])
+    return jsonify({folder: [{"name": n, "mtime": t} for n, t in list_images(folder).items()]
+                    for folder in FORMATS})
 
 
 @app.get("/api/status")
 def status():
-    return jsonify({**player_state(), "format": current_format()})
-
-
-@app.post("/api/format/<name>")
-def set_format(name):
-    if name not in FORMATS:
-        abort(404)
-    vf = format_filter(name)
-    os.makedirs(os.path.dirname(MPV_CONF), exist_ok=True)
-    tmp = MPV_CONF + ".tmp"
-    with open(tmp, "w") as f:  # write and swap, so a power cut never leaves half a file
-        f.write(f"# Screen format chosen on the Presenter page, format: {name}\nvf={vf}\n")
-        f.flush()
-        os.fsync(f.fileno())
-    os.replace(tmp, MPV_CONF)
-    with suppress(MpvError):  # if mpv is down it reads the file when it starts
-        mpv(["set_property", "vf", vf])
-    return jsonify(ok=True)
+    return jsonify(player_state())
 
 
 PLAYER_ACTIONS = {
@@ -232,7 +197,7 @@ def player(action):
 
 @app.post("/api/show/<name>")
 def show(name):
-    image_path(name)
+    image_path(FORMAT, name)
     names = playlist_names()
     if not player_state()["pinned"] and name in names:
         mpv(["playlist-play-index", names.index(name)])
@@ -244,7 +209,7 @@ def show(name):
 
 @app.post("/api/pin/<name>")
 def pin(name):
-    mpv(["set_property", "loop-file", "inf"], ["loadfile", image_path(name), "replace"])
+    mpv(["set_property", "loop-file", "inf"], ["loadfile", image_path(FORMAT, name), "replace"])
     return jsonify(ok=True)
 
 
@@ -256,8 +221,10 @@ def resume():
     return jsonify(ok=True)
 
 
-@app.post("/api/upload")
-def upload():
+@app.post("/api/upload/<folder>")
+def upload(folder):
+    if folder not in FORMATS:
+        abort(404)
     files = request.files.getlist("files")
     if not files:
         return jsonify(error="No file received"), 400
@@ -266,18 +233,22 @@ def upload():
             return jsonify(error=f"{f.filename}: only JPG, PNG, WebP and GIF images are allowed"), 400
     if shutil.disk_usage(SLIDES_DIR).free < MIN_FREE_MB * 1024 * 1024:
         return jsonify(error="The Pi is running out of disk space, delete some images first"), 507
-    saved = [save_upload(f) for f in files]
+    saved = [save_upload(f, folder) for f in files]
+    if folder != FORMAT:  # stored for a screen of the other format
+        return jsonify(saved=saved)
     with suppress(MpvError):  # if mpv is down it loads the whole folder when it starts
         if not player_state()["pinned"]:  # in "only this" mode new files join on resume
-            mpv(*(["loadfile", os.path.join(SLIDES_DIR, n), "append-play"] for n in saved))
+            mpv(*(["loadfile", os.path.join(PLAY_DIR, n), "append-play"] for n in saved))
     return jsonify(saved=saved)
 
 
-@app.delete("/api/images/<name>")
-def delete(name):
-    os.remove(image_path(name))
+@app.delete("/api/images/<folder>/<name>")
+def delete(folder, name):
+    os.remove(image_path(folder, name))
     with suppress(FileNotFoundError):
-        os.remove(os.path.join(THUMB_DIR, name + ".jpg"))
+        os.remove(os.path.join(THUMB_DIR, folder, name + ".jpg"))
+    if folder != FORMAT:  # not on this screen, nothing to tell the player
+        return jsonify(ok=True)
     with suppress(MpvError):
         state = player_state()
         if state["pinned"] and state["current"] == name:
@@ -289,12 +260,12 @@ def delete(name):
     return jsonify(ok=True)
 
 
-@app.get("/thumb/<name>")
-def thumb(name):
-    src = image_path(name)
+@app.get("/thumb/<folder>/<name>")
+def thumb(folder, name):
+    src = image_path(folder, name)
     if Image is None:
         return send_file(src, max_age=86400)
-    dst = os.path.join(THUMB_DIR, name + ".jpg")
+    dst = os.path.join(THUMB_DIR, folder, name + ".jpg")
     if not os.path.exists(dst) or os.path.getmtime(dst) < os.path.getmtime(src):
         with thumb_slots:
             try:

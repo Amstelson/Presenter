@@ -49,12 +49,17 @@
   .banner span { flex: 1; min-width: 0; overflow-wrap: anywhere; font-size: 14px; }
 
   main { max-width: 1200px; margin: 0 auto; padding: 16px; }
-  .toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-bottom: 16px; }
-  .toolbar .label { color: var(--muted); font-size: 14px; }
-  .segmented { display: flex; flex: 1; max-width: 480px; min-width: 260px; padding: 3px; gap: 3px;
+  .segmented { display: flex; max-width: 480px; margin-bottom: 12px; padding: 3px; gap: 3px;
     background: var(--panel); border: 1px solid var(--line); border-radius: 12px; }
-  .segmented button { flex: 1; border: 0; background: transparent; padding: 6px 8px; font-size: 14px; }
+  .segmented button { flex: 1; border: 0; background: transparent; padding: 6px 8px; font-size: 15px; }
   .segmented button.active { background: var(--accent); color: #15120a; font-weight: 600; }
+  .segmented .tag { font-size: 11px; font-weight: 500; padding: 1px 6px; border-radius: 999px; border: 1px solid currentColor; }
+  .count { opacity: .7; font-weight: 400; }
+  .note { margin: 0 0 16px; color: var(--muted); font-size: 14px; }
+  .note:empty { display: none; }
+  .card.stored .shot { pointer-events: none; }
+  .card.stored .pin { display: none; }
+  .card.stored .actions .danger { flex: 1; }
   .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; }
   .card { position: relative; background: var(--panel); border: 2px solid transparent; border-radius: 12px; overflow: hidden; }
   .card.current { border-color: var(--accent); }
@@ -111,16 +116,17 @@
 </header>
 
 <main>
-  <div class="toolbar">
-    <span class="label">Screen format</span>
-    <div class="segmented" id="formats">
-      {% for name, label, ratio in formats %}
-      <button data-format="{{ name }}" data-ratio="{{ ratio or '' }}">{{ label }}</button>
-      {% endfor %}
-    </div>
+  <div class="segmented" id="folders">
+    {% for name, label, ratio in formats %}
+    <button data-folder="{{ name }}" data-label="{{ label }}" data-ratio="{{ ratio }}">
+      {{ label }} <span class="count"></span>
+      {% if name == on_screen %}<span class="tag">on screen</span>{% endif %}
+    </button>
+    {% endfor %}
   </div>
+  <p class="note" id="folder-note"></p>
   <div class="grid" id="grid"></div>
-  <p class="empty" id="empty">No images yet. Tap Upload (or drop files here) to add some.</p>
+  <p class="empty" id="empty">No images in this folder yet. Tap Upload (or drop files here) to add some.</p>
 </main>
 
 <nav class="controls">
@@ -153,9 +159,11 @@
 
 <script>
   const MAX_UPLOAD_MB = {{ max_upload_mb }};
+  const ON_SCREEN = "{{ on_screen }}";  // the folder this Pi's screen plays
   const ICON_PAUSE = "M7 5h4v14H7zM13 5h4v14h-4z", ICON_PLAY = "M8 5v14l11-7z";
   const $ = (id) => document.getElementById(id);
-  let state = {}, imagesKey = "", toastTimer;
+  const tab = (folder) => document.querySelector(`#folders [data-folder="${folder}"]`);
+  let state = {}, images = {}, imagesKey = "", view = ON_SCREEN, toastTimer;
 
   async function api(method, url, body) {
     const res = await fetch(url, { method, body, headers: { "X-Requested-With": "presenter" } });
@@ -179,15 +187,15 @@
 
   async function refreshStatus() {
     try { state = await api("GET", "/api/status"); }
-    catch (e) { state = { offline: true, error: e.message, format: state.format }; }
+    catch (e) { state = { offline: true, error: e.message }; }
     renderStatus();
   }
 
   async function refreshImages() {
     try {
-      const list = await api("GET", "/api/images");
-      const key = JSON.stringify(list);
-      if (key !== imagesKey) { imagesKey = key; renderGrid(list); }
+      const data = await api("GET", "/api/images");
+      const key = JSON.stringify(data);
+      if (key !== imagesKey) { imagesKey = key; images = data; renderGrid(); }
     } catch (e) { toast(e.message, true); }
   }
 
@@ -207,30 +215,36 @@
     $("pause-label").textContent = state.paused ? "Play" : "Pause";
     $("pause-btn").disabled = mode === "offline";
     $("prev-btn").disabled = $("next-btn").disabled = mode === "offline" || mode === "pinned";
-    // Thumbnails take the shape of the current screen format, as a preview of the screen.
-    document.querySelectorAll("#formats button").forEach((b) => {
-      b.classList.toggle("active", b.dataset.format === state.format);
-      if (b.dataset.format === state.format) $("grid").style.setProperty("--frame", b.dataset.ratio || "16 / 9");
-    });
-    document.querySelectorAll(".card").forEach((card) =>
-      card.classList.toggle("current", !state.offline && card.dataset.name === state.current));
+    document.querySelectorAll(".card").forEach((card) => card.classList.toggle("current",
+      !state.offline && view === ON_SCREEN && card.dataset.name === state.current));
   }
 
-  function renderGrid(list) {
-    const grid = $("grid");
-    grid.replaceChildren(...list.map(({ name, mtime }) => {
+  function renderGrid() {
+    const folder = view, label = tab(folder).dataset.label, list = images[folder] || [];
+    const stored = folder !== ON_SCREEN;  // kept on this Pi for a screen of the other format
+    document.querySelectorAll("#folders button").forEach((b) => {
+      b.classList.toggle("active", b.dataset.folder === folder);
+      b.querySelector(".count").textContent = `(${(images[b.dataset.folder] || []).length})`;
+    });
+    $("folder-note").textContent = stored
+      ? `This screen plays ${tab(ON_SCREEN).dataset.label} slides. ${label} slides are only stored here, for a ${label} screen.`
+      : "";
+    // Thumbnails take the shape of the folder's format, as a preview of the screen.
+    $("grid").style.setProperty("--frame", tab(folder).dataset.ratio);
+    $("grid").replaceChildren(...list.map(({ name, mtime }) => {
       const card = $("card-template").content.firstElementChild.cloneNode(true);
       const url = encodeURIComponent(name);
       card.dataset.name = name;
-      card.querySelector("img").src = `/thumb/${url}?v=${mtime}`;
+      card.classList.toggle("stored", stored);
+      card.querySelector("img").src = `/thumb/${folder}/${url}?v=${mtime}`;
       card.querySelector("img").alt = name;
       card.querySelector(".name").textContent = name;
       card.querySelector(".name").title = name;
       card.querySelector(".shot").onclick = () => act(`/api/show/${url}`);
       card.querySelector(".pin").onclick = () => act(`/api/pin/${url}`);
       card.querySelector(".delete").onclick = async () => {
-        if (!confirm(`Delete "${name}" from the slideshow?`)) return;
-        await act(`/api/images/${url}`, "DELETE");
+        if (!confirm(`Delete "${name}" from ${label}?`)) return;
+        await act(`/api/images/${folder}/${url}`, "DELETE");
         await refreshImages();
       };
       return card;
@@ -240,6 +254,7 @@
   }
 
   async function upload(files) {
+    const folder = view, label = tab(folder).dataset.label;
     files = [...files];
     let done = 0;
     for (const file of files) {
@@ -247,13 +262,13 @@
         toast(`${file.name} is larger than ${MAX_UPLOAD_MB} MB, skipped`, true);
         continue;
       }
-      toast(`Uploading ${done + 1} of ${files.length}: ${file.name}`);
+      toast(`Uploading to ${label}, ${done + 1} of ${files.length}: ${file.name}`);
       const form = new FormData();
       form.append("files", file);
-      try { await api("POST", "/api/upload", form); done++; }
+      try { await api("POST", `/api/upload/${folder}`, form); done++; }
       catch (e) { toast(`${file.name}: ${e.message}`, true); }
     }
-    if (done) toast(`Uploaded ${done} image${done > 1 ? "s" : ""}`);
+    if (done) toast(`Uploaded ${done} image${done > 1 ? "s" : ""} to ${label}`);
     await refreshImages();
     await refreshStatus();
   }
@@ -262,8 +277,8 @@
   $("next-btn").onclick = () => act("/api/player/next");
   $("pause-btn").onclick = () => act(state.paused ? "/api/player/play" : "/api/player/pause");
   $("resume-btn").onclick = () => act("/api/resume");
-  document.querySelectorAll("#formats button").forEach((b) => {
-    b.onclick = () => act(`/api/format/${b.dataset.format}`);
+  document.querySelectorAll("#folders button").forEach((b) => {
+    b.onclick = () => { view = b.dataset.folder; renderGrid(); };
   });
   $("upload-btn").onclick = () => $("file-input").click();
   $("file-input").onchange = (e) => { upload(e.target.files); e.target.value = ""; };

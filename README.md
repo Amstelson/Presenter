@@ -2,13 +2,14 @@
 
 A promo slideshow for the cinema screen that staff control from a phone or PC.
 
-- **mpv** plays every image in `~/slides` fullscreen, in a loop.
+- Each Pi drives one screen, set up once as **DCI Flat** (1.85:1) or **DCI Scope** (2.39:1).
+- **mpv** plays every image in that format's folder (`~/slides/flat` or `~/slides/scope`) fullscreen, in a loop, framed to the format.
 - A small **Flask** web app (`app.py`) controls mpv through its IPC socket and serves the control page at **`http://<pi-ip>:8888`**.
 
 ```
  phone / PC  --HTTP :8888-->  app.py (Flask)  --JSON over /tmp/mpv.sock-->  mpv (fullscreen)
                                    |                                          |
-                                   +---------------- ~/slides/ ---------------+
+                                   +--------- ~/slides/flat or scope ---------+
 ```
 
 The web page lets staff:
@@ -16,8 +17,7 @@ The web page lets staff:
 - see thumbnails of all images and tap one to show it now
 - pause and play, or go to the next or previous image
 - use **Only this** to show one image until told otherwise, and **Resume slideshow** to go back to the full loop
-- switch the screen format between **Full screen**, **DCI Flat** (1.85:1) and **DCI Scope** (2.39:1)
-- upload images (JPG, PNG, WebP, GIF, up to 50 MB each) and delete them
+- upload images (JPG, PNG, WebP, GIF, up to 50 MB each) into the Flat or Scope folder, and delete them
 
 It works offline on the LAN (no CDN, no internet needed) and is protected by a username and password.
 
@@ -36,7 +36,7 @@ It works offline on the LAN (no CDN, no internet needed) and is protected by a u
 
    If the repository is private, either sign in with a GitHub token, or download the ZIP from GitHub and copy the folder over with a USB stick or `scp`.
 
-2. Run the installer **as the normal desktop user** (not with sudo). It asks you for the web password:
+2. Run the installer **as the normal desktop user** (not with sudo). It asks for the web password and whether this Pi's screen is **flat** or **scope**:
 
    ```sh
    cd ~/presenter
@@ -45,7 +45,7 @@ It works offline on the LAN (no CDN, no internet needed) and is protected by a u
 
 3. **Turn off the old slideshow viewer** so it does not fight mpv for the screen. Look for its start entry in `~/.config/autostart/`, `~/.config/labwc/autostart`, `~/.config/wayfire.ini` or `~/.config/lxsession/LXDE-pi/autostart`, and remove it.
 
-4. Copy your images to `~/slides`, or upload them from the web page later.
+4. Copy your images to `~/slides/flat` (Flat versions) and `~/slides/scope` (Scope versions), or upload them from the web page later. Images left directly in `~/slides` by an earlier version are moved into this screen's folder by the installer.
 
 5. Reboot (`sudo reboot`) and check that the slideshow appears without touching anything.
 
@@ -60,12 +60,12 @@ sudo apt install mpv python3-flask python3-pil python3-waitress
 
 # 2. Folders, services and the desktop autostart entry
 #    (the unit files expect the code in ~/presenter)
-mkdir -p ~/slides ~/.config/systemd/user ~/.config/autostart
+mkdir -p ~/slides/flat ~/slides/scope ~/.config/systemd/user ~/.config/autostart
 cp ~/presenter/systemd/*.service ~/.config/systemd/user/
 cp ~/presenter/autostart/presenter-mpv.desktop ~/.config/autostart/
 
-# 3. Login for the web page
-printf 'PRESENTER_USER=cinema\nPRESENTER_PASSWORD=pick-a-password\n' > ~/.config/presenter.env
+# 3. Login for the web page, and this screen's format (flat or scope)
+printf 'PRESENTER_USER=cinema\nPRESENTER_PASSWORD=pick-a-password\nPRESENTER_FORMAT=flat\n' > ~/.config/presenter.env
 chmod 600 ~/.config/presenter.env
 
 # 4. Start the web app at boot (linger = user services start without a login)
@@ -92,28 +92,35 @@ mpv needs the screen, so it cannot start before the desktop does. The autostart 
 
 After a power cut the Pi boots, logs into the desktop and both services come back on their own. The web app also copes with mpv restarting: it opens a fresh socket connection for every action.
 
-## Screen format: DCI Flat and Scope
+## Flat and Scope screens
 
-The **Screen format** switch at the top of the page decides where the picture goes in the Pi's video output:
+Every slide exists twice, once per format, in two folders:
+
+```
+~/slides/flat/    Flat versions, 1998x1080 (or 3996x2160 for 4K)
+~/slides/scope/   Scope versions, 2048x858 (or 4096x1716 for 4K)
+```
+
+Each Pi is set up for the screen it drives (`PRESENTER_FORMAT=flat` or `scope`, asked by the installer). It plays **only its own folder** and frames the picture to that format, with black around it:
 
 | Format | Picture area | In a 2048x1080 (DCI 2K) output | In a 1920x1080 output |
 |---|---|---|---|
-| Full screen | the whole output | 2048x1080 | 1920x1080 |
-| Flat 1.85 | 1.85:1, centered, black around it | 1998x1080, 25 px black left and right | 1920x1038 |
-| Scope 2.39 | 2.39:1, centered, black around it | 2048x858, 111 px black top and bottom | 1920x804 |
+| Flat | 1.85:1, centered | 1998x1080, 25 px black left and right | 1920x1038 |
+| Scope | 2.39:1, centered | 2048x858, 111 px black top and bottom | 1920x804 |
 
-- Each image is fitted inside the picture area without cropping or stretching. A 16:9 slide in Scope gets black bars at its sides. Make slides in the shape of the format for a full picture: 1998x1080 for Flat and 2048x858 for Scope (or 3996x2160 and 4096x1716 for 4K).
-- The thumbnails on the page take the shape of the current format, so they show how each slide will sit on the screen.
-- The switch takes effect immediately, even when paused or in "Only this" mode. It is remembered across mpv restarts and reboots (it is stored in `~/.config/presenter/mpv.conf`, which mpv reads when it starts).
-- The switch only changes the Pi's picture. Select the matching format on the projector (lens, masking) as usual.
+- On the web page, the **Flat** and **Scope** tabs show the two folders. The tab marked **on screen** is the one this Pi plays. **Upload** puts images into the open tab. The other folder can be filled and cleaned up too (useful to keep both sets on every Pi), but its slides are never shown on this screen.
+- Thumbnails take the shape of the folder's format, so they show how each slide will sit on the screen.
+- A slide with the wrong shape is fitted without cropping or stretching. For example, a 16:9 image in a Scope folder gets black bars at its sides.
+- To move a Pi to the other kind of screen, change `PRESENTER_FORMAT` in `~/.config/presenter.env` and run `systemctl --user restart presenter-web presenter-mpv`.
+- The Pi only frames its own picture. The projector's lens and masking stay set for that theatre as usual.
 
 **Getting exact DCI frames.** The areas are pixel exact when the Pi sends a **2048x1080** signal (the DCI 2K container). This is what a digital cinema projector uses for DCPs. Whether 2048x1080 is offered depends on what the projector or cinema server tells the Pi it accepts:
 
 - Check the modes on offer in a terminal on the Pi's desktop with `wlr-randr` (Wayland) or `xrandr` (X11).
 - If 2048x1080 is listed, select it in the desktop's screen settings (Screen Configuration). The desktop remembers it across reboots.
-- With a 1920x1080 signal the shapes are still correct, just slightly smaller (see the table). In that case the projector's own scaling for that input decides the final size on screen. If the projector already stretches its HDMI input to fill the flat frame, use **Full screen** for flat.
+- With a 1920x1080 signal the shapes are still correct, just slightly smaller (see the table). In that case the projector's own scaling for that input decides the final size on screen.
 
-To change the shapes or labels, or to add more formats, edit `FORMATS` at the top of `app.py`.
+The framing for each format lives in `mpv/formats.conf` (one mpv profile per format). To add a format, add a profile there and an entry in `FORMATS` at the top of `app.py`. The folder of the same name is created automatically.
 
 ## Finding the Pi's address
 
@@ -147,7 +154,8 @@ Edit `~/.config/presenter.env`, then restart both services with `systemctl --use
 |---|---|---|
 | `PRESENTER_USER` | `cinema` | web login name |
 | `PRESENTER_PASSWORD` | `change-me` | web password (the installer sets one) |
-| `PRESENTER_SLIDES` | `~/slides` (`/home/pi/slides` for user pi) | image folder, as a full path |
+| `PRESENTER_FORMAT` | `flat` | this Pi's screen: `flat` or `scope` (anything else stops the slideshow) |
+| `PRESENTER_SLIDES` | `~/slides` (`/home/pi/slides` for user pi) | folder holding `flat/` and `scope/`, as a full path |
 | `PRESENTER_DURATION` | `10` | seconds per image |
 | `PRESENTER_PORT` | `8888` | web port |
 | `PRESENTER_SOCKET` | `/tmp/mpv.sock` | mpv IPC socket |
@@ -160,7 +168,7 @@ The same defaults are at the top of `app.py`, along with the upload limit (`MAX_
 
 ### 1. Automated tests (any Debian or Ubuntu machine, about 2 minutes)
 
-The tests start a real mpv without a screen (`--vo=null`) and drive every button through the web API. They cover login, the cross-site request block, next/prev/pause, "only this", resume, upload (filename cleanup, wrong file types, size limit), delete, thumbnails, the Flat and Scope frames (also after an mpv restart), and mpv being down.
+The tests start a real mpv without a screen (`--vo=null`) and drive every button through the web API. They cover login, the cross-site request block, next/prev/pause, "only this", resume, upload (filename cleanup, wrong file types, size limit), delete, thumbnails, the exact Flat and Scope frames, keeping the two folders apart (uploads and deletes in the other folder never touch the screen, even with the same file names), and mpv being down.
 
 ```sh
 sudo apt install mpv python3-flask python3-pil python3-pytest
@@ -187,7 +195,7 @@ Checklist (use the same one on the Pi):
 - [ ] After a reboot the slideshow comes up fullscreen without any clicks.
 - [ ] Previous / Pause / Play / Next, tapping a thumbnail, Only this and Resume slideshow all change the screen within a second.
 - [ ] Upload from a phone (several files at once) and delete work. A `.txt` file and a file over 50 MB are refused.
-- [ ] Flat and Scope put the picture in the right frame, and the choice is still active after a reboot.
+- [ ] The screen shows only the slides of its own folder, in the right frame. Uploading to the other tab changes nothing on screen.
 - [ ] Two phones at once stay in sync (the page refreshes every few seconds).
 - [ ] `pkill mpv`: the slideshow is back in about 3 seconds.
 - [ ] `pkill -f presenter/app.py`: the page works again in about 3 seconds.
@@ -211,13 +219,14 @@ journalctl --user -u presenter-web -n 50              # web app log
   sh -c "systemctl --user import-environment DISPLAY WAYLAND_DISPLAY XAUTHORITY; systemctl --user restart presenter-mpv.service"
   ```
 
+- **Black screen, mpv log says "Unknown profile":** `PRESENTER_FORMAT` in `~/.config/presenter.env` must be exactly `flat` or `scope`.
 - **Talk to mpv directly** (needs `sudo apt install socat`):
 
   ```sh
   echo '{"command":["get_property","path"]}' | socat - /tmp/mpv.sock
   ```
 
-- **Keep it fast on a Pi 4:** export posters at screen size (1920x1080, or 1080x1920 for portrait) as JPG. Images larger than 3840x2160 are shrunk automatically when shown, because the Pi 4 GPU cannot display images wider or taller than 4096 pixels. Shrinking them costs time on every change, though.
+- **Keep it fast on a Pi 4:** export slides at their DCI 2K size (1998x1080 or 2048x858) as JPG. Larger images are shrunk automatically when shown, because the Pi 4 GPU cannot display images wider or taller than 4096 pixels. Shrinking them costs time on every change, though.
 
 ## Uninstall
 
@@ -234,6 +243,7 @@ systemctl --user daemon-reload
 | `app.py` | Flask web app, talks to mpv over `/tmp/mpv.sock` |
 | `templates/index.html` | the control page (HTML, CSS and JS, no external files) |
 | `systemd/presenter-mpv.service` | runs mpv fullscreen with the IPC socket, restarts it |
+| `mpv/formats.conf` | the Flat and Scope framing, one mpv profile each |
 | `systemd/presenter-web.service` | runs the web app at boot, restarts it if it stops |
 | `autostart/presenter-mpv.desktop` | starts the mpv service when the desktop is up |
 | `install.sh` | one-step install on the Pi |
