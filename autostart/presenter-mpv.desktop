@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Name=Presenter slideshow
+Comment=Pass the screen session to systemd and start the mpv slideshow
+Exec=sh -c "systemctl --user import-environment DISPLAY WAYLAND_DISPLAY XAUTHORITY; systemctl --user restart presenter-mpv.service"
+NoDisplay=true
+X-GNOME-Autostart-enabled=true

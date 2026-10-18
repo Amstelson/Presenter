@@ -1,0 +1,13 @@
+[Unit]
+Description=Presenter web remote (http://<pi-ip>:8888)
+
+[Service]
+Environment=PYTHONUNBUFFERED=1
+EnvironmentFile=-%h/.config/presenter.env
+WorkingDirectory=%h/presenter
+ExecStart=/usr/bin/python3 %h/presenter/app.py
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=default.target

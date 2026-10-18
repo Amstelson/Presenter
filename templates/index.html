@@ -1,0 +1,268 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#101217">
+<link rel="icon" href="data:,">
+<title>Presenter</title>
+<style>
+  :root {
+    --bg: #101217; --panel: #1a1d24; --raised: #252a33; --line: #2c313c;
+    --text: #ececef; --muted: #9ba1ad; --accent: #f5b301; --danger: #ef5b5b; --ok: #3fb950;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 16px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    padding-bottom: calc(88px + env(safe-area-inset-bottom));
+  }
+  svg { width: 22px; height: 22px; fill: currentColor; flex: none; }
+  button {
+    font: inherit; color: var(--text); background: var(--raised); border: 1px solid var(--line);
+    border-radius: 10px; padding: 8px 14px; min-height: 44px; cursor: pointer;
+    display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  }
+  button:hover:not(:disabled) { border-color: var(--muted); }
+  button:disabled { opacity: .35; cursor: default; }
+  .primary { background: var(--accent); border-color: var(--accent); color: #15120a; font-weight: 600; }
+  .danger { color: var(--danger); }
+
+  header {
+    position: sticky; top: 0; z-index: 5; background: rgba(16, 18, 23, .96);
+    border-bottom: 1px solid var(--line); padding: 10px 16px;
+  }
+  .bar { display: flex; align-items: center; gap: 12px; max-width: 1200px; margin: 0 auto; }
+  h1 { font-size: 18px; margin: 0; }
+  .status { flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 14px; }
+  .status span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--muted); flex: none; }
+  .dot.playing { background: var(--ok); }
+  .dot.paused, .dot.pinned { background: var(--accent); }
+  .dot.offline { background: var(--danger); }
+  .banner {
+    display: none; max-width: 1200px; margin: 10px auto 0; padding: 10px 12px; border-radius: 10px;
+    align-items: center; gap: 12px; background: rgba(245, 179, 1, .12); border: 1px solid rgba(245, 179, 1, .4);
+  }
+  .banner.show { display: flex; }
+  .banner.error { background: rgba(239, 91, 91, .12); border-color: rgba(239, 91, 91, .45); }
+  .banner span { flex: 1; min-width: 0; overflow-wrap: anywhere; font-size: 14px; }
+
+  main { max-width: 1200px; margin: 0 auto; padding: 16px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; }
+  .card { position: relative; background: var(--panel); border: 2px solid transparent; border-radius: 12px; overflow: hidden; }
+  .card.current { border-color: var(--accent); }
+  .card .shot { display: block; width: 100%; padding: 0; border: 0; border-radius: 0; background: #000; }
+  .card img { display: block; width: 100%; aspect-ratio: 16 / 9; object-fit: contain; }
+  .badge {
+    display: none; position: absolute; top: 6px; left: 6px; padding: 2px 8px; border-radius: 999px;
+    background: var(--accent); color: #15120a; font-size: 12px; font-weight: 600;
+  }
+  .card.current .badge { display: block; }
+  .name { padding: 6px 8px 0; font-size: 12px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .actions { display: flex; gap: 6px; padding: 8px; }
+  .actions button { flex: 1; padding: 6px; font-size: 14px; min-height: 40px; }
+  .actions .danger { flex: 0 0 44px; }
+  .empty { display: none; text-align: center; color: var(--muted); padding: 48px 16px; }
+
+  .controls {
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 5; display: flex; justify-content: center; gap: 10px;
+    padding: 12px 16px calc(12px + env(safe-area-inset-bottom));
+    background: rgba(16, 18, 23, .96); border-top: 1px solid var(--line);
+  }
+  .controls button { flex: 1; max-width: 170px; min-height: 52px; }
+  .toast {
+    position: fixed; left: 50%; bottom: calc(96px + env(safe-area-inset-bottom)); transform: translateX(-50%);
+    max-width: calc(100% - 32px); padding: 10px 16px; border-radius: 10px; background: var(--raised);
+    border: 1px solid var(--line); box-shadow: 0 6px 24px rgba(0, 0, 0, .4); font-size: 14px;
+    opacity: 0; pointer-events: none; transition: opacity .2s; z-index: 10;
+  }
+  .toast.show { opacity: 1; }
+  .toast.error { border-color: var(--danger); color: #ffd6d6; }
+  body.dragging main { outline: 2px dashed var(--accent); outline-offset: -8px; border-radius: 16px; }
+  @media (max-width: 420px) {
+    .upload-label { display: none; }
+    .controls button { flex-direction: column; gap: 2px; font-size: 12px; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <div class="bar">
+    <h1>Presenter</h1>
+    <div class="status"><i class="dot" id="dot"></i><span id="status">Connecting...</span></div>
+    <button id="upload-btn" title="Upload images">
+      <svg viewBox="0 0 24 24"><path d="M11 16V7.8l-3.6 3.6L6 10l6-6 6 6-1.4 1.4L13 7.8V16zM5 18h14v2H5z"/></svg>
+      <span class="upload-label">Upload</span>
+    </button>
+    <input type="file" id="file-input" accept=".jpg,.jpeg,.png,.webp,.gif,image/jpeg,image/png,image/webp,image/gif" multiple hidden>
+  </div>
+  <div class="banner" id="pin-banner">
+    <span id="pin-text"></span>
+    <button class="primary" id="resume-btn">Resume slideshow</button>
+  </div>
+  <div class="banner error" id="error-banner"><span id="error-text"></span></div>
+</header>
+
+<main>
+  <div class="grid" id="grid"></div>
+  <p class="empty" id="empty">No images yet. Tap Upload (or drop files here) to add some.</p>
+</main>
+
+<nav class="controls">
+  <button id="prev-btn" title="Previous image">
+    <svg viewBox="0 0 24 24"><path d="M6 6h2v12H6zM20 6v12L9.5 12z"/></svg><span>Previous</span>
+  </button>
+  <button id="pause-btn" class="primary" title="Pause or play">
+    <svg viewBox="0 0 24 24"><path id="pause-icon" d="M7 5h4v14H7zM13 5h4v14h-4z"/></svg><span id="pause-label">Pause</span>
+  </button>
+  <button id="next-btn" title="Next image">
+    <svg viewBox="0 0 24 24"><path d="M16 6h2v12h-2zM4 6v12l10.5-6z"/></svg><span>Next</span>
+  </button>
+</nav>
+
+<div class="toast" id="toast"></div>
+
+<template id="card-template">
+  <div class="card">
+    <button class="shot" title="Show this image now"><img alt="" loading="lazy" decoding="async"></button>
+    <span class="badge">On screen</span>
+    <div class="name"></div>
+    <div class="actions">
+      <button class="pin" title="Show only this image, no slideshow">Only this</button>
+      <button class="delete danger" title="Delete image">
+        <svg viewBox="0 0 24 24"><path d="M9 3h6l1 2h4v2H4V5h4zM6 9h12l-1 12H7zm4 2v8h1.5v-8zm2.5 0v8H14v-8z"/></svg>
+      </button>
+    </div>
+  </div>
+</template>
+
+<script>
+  const MAX_UPLOAD_MB = {{ max_upload_mb }};
+  const ICON_PAUSE = "M7 5h4v14H7zM13 5h4v14h-4z", ICON_PLAY = "M8 5v14l11-7z";
+  const $ = (id) => document.getElementById(id);
+  let state = {}, imagesKey = "", toastTimer;
+
+  async function api(method, url, body) {
+    const res = await fetch(url, { method, body, headers: { "X-Requested-With": "presenter" } });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || `${res.status} ${res.statusText}`);
+    return data;
+  }
+
+  function toast(message, isError = false) {
+    const el = $("toast");
+    el.textContent = message;
+    el.className = "toast show" + (isError ? " error" : "");
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => el.classList.remove("show"), isError ? 5000 : 2500);
+  }
+
+  async function act(url, method = "POST") {
+    try { await api(method, url); } catch (e) { toast(e.message, true); }
+    await refreshStatus();
+  }
+
+  async function refreshStatus() {
+    try { state = await api("GET", "/api/status"); }
+    catch (e) { state = { offline: true, error: e.message }; }
+    renderStatus();
+  }
+
+  async function refreshImages() {
+    try {
+      const list = await api("GET", "/api/images");
+      const key = JSON.stringify(list);
+      if (key !== imagesKey) { imagesKey = key; renderGrid(list); }
+    } catch (e) { toast(e.message, true); }
+  }
+
+  function renderStatus() {
+    const mode = state.offline ? "offline" : state.pinned ? "pinned" : state.paused ? "paused" : "playing";
+    const name = state.current || "nothing";
+    $("dot").className = "dot " + mode;
+    $("status").textContent = {
+      offline: "Player not running", pinned: `Only this: ${name}`,
+      paused: `Paused on ${name}`, playing: `Playing: ${name}`,
+    }[mode];
+    $("pin-banner").classList.toggle("show", mode === "pinned");
+    $("pin-text").textContent = "Only this image is on screen. Next and Previous are off until you resume.";
+    $("error-banner").classList.toggle("show", mode === "offline");
+    $("error-text").textContent = `The slideshow player is not reachable. Images can still be managed. (${state.error || ""})`;
+    $("pause-icon").setAttribute("d", state.paused ? ICON_PLAY : ICON_PAUSE);
+    $("pause-label").textContent = state.paused ? "Play" : "Pause";
+    $("pause-btn").disabled = mode === "offline";
+    $("prev-btn").disabled = $("next-btn").disabled = mode === "offline" || mode === "pinned";
+    document.querySelectorAll(".card").forEach((card) =>
+      card.classList.toggle("current", !state.offline && card.dataset.name === state.current));
+  }
+
+  function renderGrid(list) {
+    const grid = $("grid");
+    grid.replaceChildren(...list.map(({ name, mtime }) => {
+      const card = $("card-template").content.firstElementChild.cloneNode(true);
+      const url = encodeURIComponent(name);
+      card.dataset.name = name;
+      card.querySelector("img").src = `/thumb/${url}?v=${mtime}`;
+      card.querySelector("img").alt = name;
+      card.querySelector(".name").textContent = name;
+      card.querySelector(".name").title = name;
+      card.querySelector(".shot").onclick = () => act(`/api/show/${url}`);
+      card.querySelector(".pin").onclick = () => act(`/api/pin/${url}`);
+      card.querySelector(".delete").onclick = async () => {
+        if (!confirm(`Delete "${name}" from the slideshow?`)) return;
+        await act(`/api/images/${url}`, "DELETE");
+        await refreshImages();
+      };
+      return card;
+    }));
+    $("empty").style.display = list.length ? "none" : "block";
+    renderStatus();
+  }
+
+  async function upload(files) {
+    files = [...files];
+    let done = 0;
+    for (const file of files) {
+      if (file.size > MAX_UPLOAD_MB * 1024 * 1024) {
+        toast(`${file.name} is larger than ${MAX_UPLOAD_MB} MB, skipped`, true);
+        continue;
+      }
+      toast(`Uploading ${done + 1} of ${files.length}: ${file.name}`);
+      const form = new FormData();
+      form.append("files", file);
+      try { await api("POST", "/api/upload", form); done++; }
+      catch (e) { toast(`${file.name}: ${e.message}`, true); }
+    }
+    if (done) toast(`Uploaded ${done} image${done > 1 ? "s" : ""}`);
+    await refreshImages();
+    await refreshStatus();
+  }
+
+  $("prev-btn").onclick = () => act("/api/player/prev");
+  $("next-btn").onclick = () => act("/api/player/next");
+  $("pause-btn").onclick = () => act(state.paused ? "/api/player/play" : "/api/player/pause");
+  $("resume-btn").onclick = () => act("/api/resume");
+  $("upload-btn").onclick = () => $("file-input").click();
+  $("file-input").onchange = (e) => { upload(e.target.files); e.target.value = ""; };
+
+  // Drag and drop files anywhere on the page (desktop browsers).
+  let dragDepth = 0;
+  document.addEventListener("dragenter", (e) => { e.preventDefault(); dragDepth++; document.body.classList.add("dragging"); });
+  document.addEventListener("dragleave", () => { if (--dragDepth <= 0) { dragDepth = 0; document.body.classList.remove("dragging"); } });
+  document.addEventListener("dragover", (e) => e.preventDefault());
+  document.addEventListener("drop", (e) => {
+    e.preventDefault();
+    dragDepth = 0;
+    document.body.classList.remove("dragging");
+    if (e.dataTransfer.files.length) upload(e.dataTransfer.files);
+  });
+
+  // Keep the page in sync with the screen and with other staff members' changes.
+  setInterval(() => { if (!document.hidden) refreshStatus(); }, 2000);
+  setInterval(() => { if (!document.hidden) refreshImages(); }, 10000);
+  document.addEventListener("visibilitychange", () => { if (!document.hidden) { refreshStatus(); refreshImages(); } });
+  refreshImages().then(refreshStatus);
+</script>
+</body>
+</html>

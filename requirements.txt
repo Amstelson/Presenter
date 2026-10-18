@@ -1,0 +1,5 @@
+# On Raspberry Pi OS install these with apt instead (see README):
+#   sudo apt install python3-flask python3-pil python3-waitress
+flask>=2.2
+pillow
+waitress

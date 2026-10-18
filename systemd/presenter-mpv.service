@@ -1,0 +1,23 @@
+[Unit]
+Description=Presenter slideshow player (mpv)
+# Not enabled at boot on purpose: the desktop autostart entry
+# (presenter-mpv.desktop) starts it once the screen session exists.
+# Give up after 10 failed starts in 2 minutes instead of looping forever.
+StartLimitIntervalSec=120
+StartLimitBurst=10
+
+[Service]
+# Defaults, can be overridden in ~/.config/presenter.env
+Environment=PRESENTER_SLIDES=%h/slides PRESENTER_SOCKET=/tmp/mpv.sock PRESENTER_DURATION=10
+EnvironmentFile=-%h/.config/presenter.env
+ExecStartPre=/usr/bin/mkdir -p ${PRESENTER_SLIDES}
+# --idle/--force-window: keep a black fullscreen window even with no images
+# --vf=scale...: shrink huge images to fit the Pi 4 GPU texture limit (4096 px)
+ExecStart=/usr/bin/mpv --fs --idle=yes --force-window=yes \
+    --loop-playlist=inf --image-display-duration=${PRESENTER_DURATION} \
+    --input-ipc-server=${PRESENTER_SOCKET} \
+    --no-osc --osd-level=0 --cursor-autohide=always --no-audio --no-terminal \
+    --vf=scale=w=[min(iw,3840)]:h=[min(ih,2160)]:force_original_aspect_ratio=decrease \
+    ${PRESENTER_SLIDES}
+Restart=always
+RestartSec=3
