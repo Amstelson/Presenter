@@ -1,0 +1,16 @@
+[Unit]
+Description=Presenter HDMI mode keeper (does nothing unless PRESENTER_HDMI_MODE is set)
+# Started together with the slideshow player (Wants= in presenter-mpv.service),
+# because it needs the desktop session too.
+PartOf=presenter-mpv.service
+
+[Service]
+Environment=PYTHONUNBUFFERED=1 PRESENTER_HDMI_MODE=
+EnvironmentFile=-%h/.config/presenter.env
+# Sets the mode, then sets it again whenever something else changes it,
+# for example after the projector was turned off and on.
+ExecStart=/usr/bin/python3 %h/presenter/hdmi_mode.py keep ${PRESENTER_HDMI_MODE}
+Restart=on-failure
+RestartSec=10
+# Exit code 2 means a mistyped PRESENTER_HDMI_MODE: retrying will not help.
+RestartPreventExitStatus=2

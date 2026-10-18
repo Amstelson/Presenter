@@ -14,11 +14,11 @@ fi
 
 echo "==> Installing packages"
 sudo apt-get update
-sudo apt-get install -y mpv python3-flask python3-pil python3-waitress
+sudo apt-get install -y mpv python3-flask python3-pil python3-waitress wlr-randr
 
 echo "==> Installing services"
 mkdir -p "$HOME/slides/flat" "$HOME/slides/scope" "$UNIT_DIR" "$HOME/.config/autostart"
-for unit in presenter-mpv.service presenter-web.service; do
+for unit in presenter-mpv.service presenter-hdmi.service presenter-web.service; do
     sed "s|%h/presenter|$APP_DIR|g" "$APP_DIR/systemd/$unit" > "$UNIT_DIR/$unit"
 done
 cp "$APP_DIR/autostart/presenter-mpv.desktop" "$HOME/.config/autostart/"

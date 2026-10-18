@@ -56,7 +56,7 @@ If you prefer doing it by hand, these are the same steps:
 ```sh
 # 1. Packages. Raspberry Pi OS blocks system-wide pip installs, so use apt:
 sudo apt update
-sudo apt install mpv python3-flask python3-pil python3-waitress
+sudo apt install mpv python3-flask python3-pil python3-waitress wlr-randr
 
 # 2. Folders, services and the desktop autostart entry
 #    (the unit files expect the code in ~/presenter)
@@ -87,6 +87,7 @@ If you would rather use pip, use a virtual environment: `python3 -m venv ~/prese
 |---|---|---|
 | `presenter-web.service` (Flask, port 8888) | systemd user service, enabled at boot | restarted after 3 s |
 | `presenter-mpv.service` (mpv, fullscreen) | the desktop autostart entry `presenter-mpv.desktop`, once the desktop is up | restarted after 3 s |
+| `presenter-hdmi.service` (HDMI mode keeper) | together with mpv; exits at once unless `PRESENTER_HDMI_MODE` is set | restarted after 10 s |
 
 mpv needs the screen, so it cannot start before the desktop does. The autostart entry passes the desktop's display settings (`WAYLAND_DISPLAY` or `DISPLAY`) to systemd and then starts the mpv service. That way it works on Wayland (labwc, wayfire) and X11 alike, and systemd still restarts mpv if it crashes or someone closes it.
 
@@ -114,13 +115,47 @@ Each Pi is set up for the screen it drives (`PRESENTER_FORMAT=flat` or `scope`, 
 - To move a Pi to the other kind of screen, change `PRESENTER_FORMAT` in `~/.config/presenter.env` and run `systemctl --user restart presenter-web presenter-mpv`.
 - The Pi only frames its own picture. The projector's lens and masking stay set for that theatre as usual.
 
-**Getting exact DCI frames.** The areas are pixel exact when the Pi sends a **2048x1080** signal (the DCI 2K container). This is what a digital cinema projector uses for DCPs. Whether 2048x1080 is offered depends on what the projector or cinema server tells the Pi it accepts:
-
-- Check the modes on offer in a terminal on the Pi's desktop with `wlr-randr` (Wayland) or `xrandr` (X11).
-- If 2048x1080 is listed, select it in the desktop's screen settings (Screen Configuration). The desktop remembers it across reboots.
-- With a 1920x1080 signal the shapes are still correct, just slightly smaller (see the table). In that case the projector's own scaling for that input decides the final size on screen.
-
 The framing for each format lives in `mpv/formats.conf` (one mpv profile per format). To add a format, add a profile there and an entry in `FORMATS` at the top of `app.py`. The folder of the same name is created automatically.
+
+## Forcing the HDMI signal
+
+By default the Pi sends whatever the projector reports as its preferred mode, often 1920x1080. `hdmi_mode.py` forces a different signal and keeps it. There are two sensible choices:
+
+| Signal | What the screen gets | Projector side |
+|---|---|---|
+| **2048x1080** (recommended) | The DCI 2K container, like a DCP: Flat slides land exactly on 1998x1080, Scope slides exactly on 2048x858 | Set the HDMI input's format (screen file or macro) to Flat or Scope, the same way as for DCPs |
+| **2048x858** (Scope theatre only) | An exact Scope signal, no black bars sent at all | The input must accept this non-standard timing; many cinema inputs do not |
+
+An exact 1998x1080 Flat signal is not possible: standard video timings come in steps of 8 pixels, so it becomes 2000x1080. For Flat, use 2048x1080. Either way the slides need no change, since the framing adapts to any signal.
+
+**1. See what the projector offers** (over SSH or on the Pi's desktop):
+
+```sh
+cd ~/presenter
+./hdmi_mode.py list
+```
+
+**2. Try a mode safely.** Watch the screen. If the picture is right, press Enter. If you don't (for example because the projector shows "no signal"), the Pi switches back after 20 seconds on its own:
+
+```sh
+./hdmi_mode.py try 2048x1080@24
+./hdmi_mode.py try 2048x858@24
+```
+
+Modes the projector does not list are created as custom modes. The refresh rate after `@` is optional: without it you get the highest rate the projector offers for that size, or 60 for a custom mode. Try 24, 48 or 60, depending on what the input accepts.
+
+If a mode is already kept with `PRESENTER_HDMI_MODE` (step 3), stop the keeper while trying others, or it switches back within 10 seconds: `systemctl --user stop presenter-hdmi`.
+
+**3. Keep it.** Add the working mode to `~/.config/presenter.env` and restart the player:
+
+```sh
+echo "PRESENTER_HDMI_MODE=2048x1080@24" >> ~/.config/presenter.env
+systemctl --user restart presenter-mpv
+```
+
+`presenter-hdmi.service` then sets that mode whenever the slideshow starts. It checks every 10 seconds and sets it again if something else changed it, for example when the projector was turned off and on. To go back to the default, remove the line, restart the player and reboot.
+
+Check what it did with `journalctl --user -u presenter-hdmi -n 20`. If the screen ever stays black, connect over SSH, remove the line and reboot.
 
 ## Finding the Pi's address
 
@@ -156,6 +191,8 @@ Edit `~/.config/presenter.env`, then restart both services with `systemctl --use
 | `PRESENTER_PASSWORD` | `change-me` | web password (the installer sets one) |
 | `PRESENTER_FORMAT` | `flat` | this Pi's screen: `flat` or `scope` (anything else stops the slideshow) |
 | `PRESENTER_SLIDES` | `~/slides` (`/home/pi/slides` for user pi) | folder holding `flat/` and `scope/`, as a full path |
+| `PRESENTER_HDMI_MODE` | not set | force the HDMI signal, e.g. `2048x1080@24` (see "Forcing the HDMI signal") |
+| `PRESENTER_HDMI_OUTPUT` | first HDMI output | which output `hdmi_mode.py` changes, e.g. `HDMI-A-2` |
 | `PRESENTER_DURATION` | `10` | seconds per image |
 | `PRESENTER_PORT` | `8888` | web port |
 | `PRESENTER_SOCKET` | `/tmp/mpv.sock` | mpv IPC socket |
@@ -168,10 +205,12 @@ The same defaults are at the top of `app.py`, along with the upload limit (`MAX_
 
 ### 1. Automated tests (any Debian or Ubuntu machine, about 2 minutes)
 
-The tests start a real mpv without a screen (`--vo=null`) and drive every button through the web API. They cover login, the cross-site request block, next/prev/pause, "only this", resume, upload (filename cleanup, wrong file types, size limit), delete, thumbnails, the exact Flat and Scope frames, keeping the two folders apart (uploads and deletes in the other folder never touch the screen, even with the same file names), and mpv being down.
+The tests start a real mpv without a screen (`--vo=null`) and drive every button through the web API. They cover login, the cross-site request block, next/prev/pause, "only this", resume, upload (filename cleanup, wrong file types, size limit), delete, thumbnails, the exact Flat and Scope frames, keeping the two folders apart (uploads and deletes in the other folder never touch the screen, even with the same file names), and mpv being down. The HDMI tests switch modes on a headless labwc (Wayland) and an Xorg dummy display (X11): trying and switching back, keeping a mode, and setting it again after a change.
 
 ```sh
 sudo apt install mpv python3-flask python3-pil python3-pytest
+# optional, for the HDMI mode tests on headless displays:
+sudo apt install labwc wlr-randr xserver-xorg-video-dummy x11-xserver-utils
 cd ~/presenter
 python3 -m pytest -v
 ```
@@ -196,6 +235,7 @@ Checklist (use the same one on the Pi):
 - [ ] Previous / Pause / Play / Next, tapping a thumbnail, Only this and Resume slideshow all change the screen within a second.
 - [ ] Upload from a phone (several files at once) and delete work. A `.txt` file and a file over 50 MB are refused.
 - [ ] The screen shows only the slides of its own folder, in the right frame. Uploading to the other tab changes nothing on screen.
+- [ ] With `PRESENTER_HDMI_MODE` set: the mode is back after a reboot and, on the Pi, after the projector is turned off and on.
 - [ ] Two phones at once stay in sync (the page refreshes every few seconds).
 - [ ] `pkill mpv`: the slideshow is back in about 3 seconds.
 - [ ] `pkill -f presenter/app.py`: the page works again in about 3 seconds.
@@ -220,6 +260,7 @@ journalctl --user -u presenter-web -n 50              # web app log
   ```
 
 - **Black screen, mpv log says "Unknown profile":** `PRESENTER_FORMAT` in `~/.config/presenter.env` must be exactly `flat` or `scope`.
+- **Black screen after setting `PRESENTER_HDMI_MODE`:** the projector does not accept that signal. Over SSH, remove the line from `~/.config/presenter.env` and reboot. Use `./hdmi_mode.py try` first next time.
 - **Talk to mpv directly** (needs `sudo apt install socat`):
 
   ```sh
@@ -231,7 +272,7 @@ journalctl --user -u presenter-web -n 50              # web app log
 ## Uninstall
 
 ```sh
-systemctl --user disable --now presenter-web presenter-mpv
+systemctl --user disable --now presenter-web presenter-mpv presenter-hdmi
 rm ~/.config/autostart/presenter-mpv.desktop ~/.config/systemd/user/presenter-*.service
 systemctl --user daemon-reload
 ```
@@ -244,7 +285,10 @@ systemctl --user daemon-reload
 | `templates/index.html` | the control page (HTML, CSS and JS, no external files) |
 | `systemd/presenter-mpv.service` | runs mpv fullscreen with the IPC socket, restarts it |
 | `mpv/formats.conf` | the Flat and Scope framing, one mpv profile each |
+| `hdmi_mode.py` | list, try and keep an HDMI output mode |
+| `systemd/presenter-hdmi.service` | keeps `PRESENTER_HDMI_MODE` set while the slideshow runs |
 | `systemd/presenter-web.service` | runs the web app at boot, restarts it if it stops |
 | `autostart/presenter-mpv.desktop` | starts the mpv service when the desktop is up |
 | `install.sh` | one-step install on the Pi |
 | `tests/test_app.py` | end-to-end tests with a real headless mpv |
+| `tests/test_hdmi_mode.py` | HDMI mode tests on headless Wayland and X11 displays |
