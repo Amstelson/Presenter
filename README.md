@@ -3,21 +3,24 @@
 A promo slideshow for the cinema screen that staff control from a phone or PC.
 
 - Each Pi drives one screen, set up once as **DCI Flat** (1.85:1) or **DCI Scope** (2.39:1).
-- **mpv** plays every image in that format's folder (`~/slides/flat` or `~/slides/scope`) fullscreen, in a loop, framed to the format.
+- Slides are kept in folders, for example `~/slides/flat/Coming soon/`.
+- **mpv** plays the slideshow fullscreen, in a loop, framed to the format: every slide that is switched on, from every folder that is switched on.
 - A small **Flask** web app (`app.py`) controls mpv through its IPC socket and serves the control page at **`http://<pi-ip>:8888`**.
 
 ```
  phone / PC  --HTTP :8888-->  app.py (Flask)  --JSON over /tmp/mpv.sock-->  mpv (fullscreen)
                                    |                                          |
-                                   +--------- ~/slides/flat or scope ---------+
+                         ~/slides/<format>/<folder>/          ~/.config/presenter/playlist.m3u8
 ```
 
 The web page lets staff:
 
-- see thumbnails of all images and tap one to show it now
-- pause and play, or go to the next or previous image
-- use **Only this** to show one image until told otherwise, and **Resume slideshow** to go back to the full loop
-- upload images (JPG, PNG, WebP, GIF, up to 50 MB each) into the Flat or Scope folder, and delete them
+- pause and play, or go to the next or previous slide
+- set the **seconds per slide** and switch **shuffle** (random order) on or off
+- create **folders**, switch whole folders on or off, or **play only one folder**
+- switch single slides **off** for a while (for example once their event is over) and back on
+- tap a slide to **show it now**, **show only this** one until told otherwise (**Resume slideshow** goes back), **move** it to another folder, or delete it
+- upload images (JPG, PNG, WebP, GIF, up to 50 MB each) into a folder
 
 It works offline on the LAN (no CDN, no internet needed) and is protected by a username and password.
 
@@ -45,7 +48,7 @@ It works offline on the LAN (no CDN, no internet needed) and is protected by a u
 
 3. **Turn off the old slideshow viewer** so it does not fight mpv for the screen. Look for its start entry in `~/.config/autostart/`, `~/.config/labwc/autostart`, `~/.config/wayfire.ini` or `~/.config/lxsession/LXDE-pi/autostart`, and remove it.
 
-4. Copy your images to `~/slides/flat` (Flat versions) and `~/slides/scope` (Scope versions), or upload them from the web page later. Images left directly in `~/slides` by an earlier version are moved into this screen's folder by the installer.
+4. Create folders and upload slides on the web page, or copy them into folders under `~/slides/flat` (Flat versions) and `~/slides/scope` (Scope versions). Images left directly in `~/slides` by an earlier version are moved into this screen's format, into the folder "General".
 
 5. Reboot (`sudo reboot`) and check that the slideshow appears without touching anything.
 
@@ -93,24 +96,35 @@ mpv needs the screen, so it cannot start before the desktop does. The autostart 
 
 After a power cut the Pi boots, logs into the desktop and both services come back on their own. The web app also copes with mpv restarting: it opens a fresh socket connection for every action.
 
+## Folders, switching slides off, shuffle and timing
+
+```
+~/slides/flat/Coming soon/dune.jpg
+~/slides/flat/Kids Club/paddington.jpg
+~/slides/scope/Coming soon/dune.jpg
+```
+
+- **Folders.** The start page lists this screen's folders. Each has a switch: switched-on folders play in the slideshow, switched-off ones are kept but not shown. **+ New folder** creates one. Tap a folder to open it: **Upload** adds slides to it, **Play only this folder** switches all the others off, and an empty folder can be deleted.
+- **Switching slides off.** Every slide has its own switch. A switched-off slide stays in its folder (dimmed, marked "Off") but is left out of the slideshow until you switch it back on. Handy for events that are over, or slides that are not due yet.
+- **Tap a slide** for more: **Show now** jumps to it, **Show only this** keeps it on screen, **Move to another folder** and **Delete**. A switched-off slide can still be shown with **Show only this**.
+- **Seconds per slide** and **Shuffle** are on the start page and apply to the whole slideshow straight away. Shuffle mixes the order again whenever the slideshow changes.
+- The screen keeps showing the current slide while you change things around it, so switching and moving do not make it flicker. If you switch off the slide on screen, the next one follows.
+- Everything is remembered across restarts and power cuts, in `~/.config/presenter/` on the Pi (`state.json` for the switches and settings, `playlist.m3u8` and `player.conf` for mpv).
+- **Copying files in without the web page** (over the network or from a USB stick) works too: put them into a folder, and they join the slideshow within 30 seconds. Images put directly into `~/slides/flat` or `~/slides/scope`, outside any folder, are moved into the folder "General".
+
 ## Flat and Scope screens
 
-Every slide exists twice, once per format, in two folders:
+Every slide exists twice, once per format: the Flat version (1998x1080, or 3996x2160 for 4K) under `~/slides/flat/` and the Scope version (2048x858, or 4096x1716 for 4K) under `~/slides/scope/`, each with its own folders.
 
-```
-~/slides/flat/    Flat versions, 1998x1080 (or 3996x2160 for 4K)
-~/slides/scope/   Scope versions, 2048x858 (or 4096x1716 for 4K)
-```
-
-Each Pi is set up for the screen it drives (`PRESENTER_FORMAT=flat` or `scope`, asked by the installer). It plays **only its own folder** and frames the picture to that format, with black around it:
+Each Pi is set up for the screen it drives (`PRESENTER_FORMAT=flat` or `scope`, asked by the installer). It plays **only its own format** and frames the picture to it, with black around it:
 
 | Format | Picture area | In a 2048x1080 (DCI 2K) output | In a 1920x1080 output |
 |---|---|---|---|
 | Flat | 1.85:1, centered | 1998x1080, 25 px black left and right | 1920x1038 |
 | Scope | 2.39:1, centered | 2048x858, 111 px black top and bottom | 1920x804 |
 
-- On the web page, the **Flat** and **Scope** tabs show the two folders. The tab marked **on screen** is the one this Pi plays. **Upload** puts images into the open tab. The other folder can be filled and cleaned up too (useful to keep both sets on every Pi), but its slides are never shown on this screen.
-- Thumbnails take the shape of the folder's format, so they show how each slide will sit on the screen.
+- On the web page, the **Flat** and **Scope** tabs at the top switch between the two formats. The tab marked **on screen** is the one this Pi plays. The other format can be filled and organized too (useful to keep both sets on every Pi), but its slides are never shown on this screen.
+- Thumbnails take the shape of the format, so they show how each slide will sit on the screen.
 - A slide with the wrong shape is fitted without cropping or stretching. For example, a 16:9 image in a Scope folder gets black bars at its sides.
 - To move a Pi to the other kind of screen, change `PRESENTER_FORMAT` in `~/.config/presenter.env` and run `systemctl --user restart presenter-web presenter-mpv`.
 - The Pi only frames its own picture. The projector's lens and masking stay set for that theatre as usual.
@@ -190,10 +204,10 @@ Edit `~/.config/presenter.env`, then restart both services with `systemctl --use
 | `PRESENTER_USER` | `cinema` | web login name |
 | `PRESENTER_PASSWORD` | `change-me` | web password (the installer sets one) |
 | `PRESENTER_FORMAT` | `flat` | this Pi's screen: `flat` or `scope` (anything else stops the slideshow) |
-| `PRESENTER_SLIDES` | `~/slides` (`/home/pi/slides` for user pi) | folder holding `flat/` and `scope/`, as a full path |
+| `PRESENTER_SLIDES` | `~/slides` (`/home/pi/slides` for user pi) | folder holding `flat/` and `scope/` |
 | `PRESENTER_HDMI_MODE` | not set | force the HDMI signal, e.g. `2048x1080@24` (see "Forcing the HDMI signal") |
 | `PRESENTER_HDMI_OUTPUT` | first HDMI output | which output `hdmi_mode.py` changes, e.g. `HDMI-A-2` |
-| `PRESENTER_DURATION` | `10` | seconds per image |
+| `PRESENTER_DURATION` | `10` | seconds per slide, until it is changed on the web page |
 | `PRESENTER_PORT` | `8888` | web port |
 | `PRESENTER_SOCKET` | `/tmp/mpv.sock` | mpv IPC socket |
 
@@ -205,7 +219,7 @@ The same defaults are at the top of `app.py`, along with the upload limit (`MAX_
 
 ### 1. Automated tests (any Debian or Ubuntu machine, about 2 minutes)
 
-The tests start a real mpv without a screen (`--vo=null`) and drive every button through the web API. They cover login, the cross-site request block, next/prev/pause, "only this", resume, upload (filename cleanup, wrong file types, size limit), delete, thumbnails, the exact Flat and Scope frames, keeping the two folders apart (uploads and deletes in the other folder never touch the screen, even with the same file names), and mpv being down. The HDMI tests switch modes on a headless labwc (Wayland) and an Xorg dummy display (X11): trying and switching back, keeping a mode, and setting it again after a change.
+The tests start a real mpv without a screen (`--vo=null`) and drive every button through the web API. They cover login, the cross-site request block, next/prev/pause, "only this", resume, upload (filename cleanup, wrong file types, size limit), delete, thumbnails, the exact Flat and Scope frames, keeping the two formats apart, folders (creating, switching, playing only one, deleting), switching slides off without disturbing the screen, moving slides, shuffle, seconds per slide, files copied in without the page, everything coming back after an mpv restart, and mpv being down. The HDMI tests switch modes on a headless labwc (Wayland) and an Xorg dummy display (X11): trying and switching back, keeping a mode, and setting it again after a change.
 
 ```sh
 sudo apt install mpv python3-flask python3-pil python3-pytest
@@ -232,9 +246,12 @@ Raspberry Pi OS images for the Pi do not boot in an x86 VM. Debian 13 is what Ra
 Checklist (use the same one on the Pi):
 
 - [ ] After a reboot the slideshow comes up fullscreen without any clicks.
-- [ ] Previous / Pause / Play / Next, tapping a thumbnail, Only this and Resume slideshow all change the screen within a second.
+- [ ] Previous / Pause / Play / Next, Show now, Show only this and Resume slideshow all change the screen within a second.
 - [ ] Upload from a phone (several files at once) and delete work. A `.txt` file and a file over 50 MB are refused.
-- [ ] The screen shows only the slides of its own folder, in the right frame. Uploading to the other tab changes nothing on screen.
+- [ ] The screen shows only the slides of its own format, in the right frame. Uploading to the other tab changes nothing on screen.
+- [ ] Folders: create one, upload into it, switch it off and on, Play only this folder. Move a slide between folders.
+- [ ] Switching a slide off removes it from the slideshow without a flicker. Seconds per slide and Shuffle take effect at once.
+- [ ] After a reboot, switched-off folders and slides, shuffle and seconds per slide are as you left them.
 - [ ] With `PRESENTER_HDMI_MODE` set: the mode is back after a reboot and, on the Pi, after the projector is turned off and on.
 - [ ] Two phones at once stay in sync (the page refreshes every few seconds).
 - [ ] `pkill mpv`: the slideshow is back in about 3 seconds.

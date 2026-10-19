@@ -74,6 +74,6 @@ fi
 
 IP=$(hostname -I 2>/dev/null | cut -d' ' -f1)
 echo
-echo "Done. Put $FORMAT images in $HOME/slides/$FORMAT (or upload them on the web page)."
+echo "Done. Create folders and upload slides on the web page (or copy them into folders under $HOME/slides/$FORMAT)."
 echo "Web remote: http://${IP:-<pi-ip>}:8888"
 echo "Reboot to check that everything starts on its own: sudo reboot"

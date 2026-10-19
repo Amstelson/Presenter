@@ -12,6 +12,7 @@
     --text: #ececef; --muted: #9ba1ad; --accent: #f5b301; --danger: #ef5b5b; --ok: #3fb950;
   }
   * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
   body {
     margin: 0; background: var(--bg); color: var(--text);
     font: 16px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
@@ -27,12 +28,28 @@
   button:disabled { opacity: .35; cursor: default; }
   .primary { background: var(--accent); border-color: var(--accent); color: #15120a; font-weight: 600; }
   .danger { color: var(--danger); }
+  h2 { font-size: 18px; margin: 0; }
+
+  /* On/off switch made from a checkbox */
+  .toggle {
+    appearance: none; -webkit-appearance: none; flex: none; position: relative; margin: 0; cursor: pointer;
+    width: 46px; height: 28px; border-radius: 14px; background: var(--line); transition: background .15s;
+  }
+  .toggle::before {
+    content: ""; position: absolute; top: 3px; left: 3px; width: 22px; height: 22px; border-radius: 50%;
+    background: var(--text); transition: transform .15s;
+  }
+  .toggle:checked { background: var(--ok); }
+  .toggle:checked::before { transform: translateX(18px); }
+  .toggle.small { width: 38px; height: 24px; }
+  .toggle.small::before { width: 18px; height: 18px; }
+  .toggle.small:checked::before { transform: translateX(14px); }
 
   header {
     position: sticky; top: 0; z-index: 5; background: rgba(16, 18, 23, .96);
     border-bottom: 1px solid var(--line); padding: 10px 16px;
   }
-  .bar { display: flex; align-items: center; gap: 12px; max-width: 1200px; margin: 0 auto; }
+  .bar { display: flex; align-items: center; gap: 12px; max-width: 1200px; margin: 0 auto; min-height: 44px; }
   h1 { font-size: 18px; margin: 0; }
   .status { flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 14px; }
   .status span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -57,24 +74,47 @@
   .count { opacity: .7; font-weight: 400; }
   .note { margin: 0 0 16px; color: var(--muted); font-size: 14px; }
   .note:empty { display: none; }
-  .card.stored .shot { pointer-events: none; }
-  .card.stored .pin { display: none; }
-  .card.stored .actions .danger { flex: 1; }
+
+  .panel { display: flex; flex-wrap: wrap; gap: 12px 24px; align-items: center; margin-bottom: 20px;
+    padding: 12px 14px; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; }
+  .field { display: flex; align-items: center; gap: 10px; }
+  .field input[type=number] { width: 84px; font: inherit; color: var(--text); background: var(--raised);
+    border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; min-height: 44px; }
+  .section-head { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
+  .section-head h2 { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+  .tools { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
+
+  .folder-row { display: flex; align-items: center; gap: 12px; margin-bottom: 8px; padding: 6px 6px 6px 14px;
+    background: var(--panel); border: 2px solid transparent; border-radius: 12px; }
+  .folder-row.current { border-color: var(--accent); }
+  .folder-row .open { flex: 1; min-width: 0; justify-content: space-between; background: transparent; border: 0; text-align: left; }
+  .folder-row .fname { font-weight: 600; overflow-wrap: anywhere; }
+  .folder-row.off .fname { color: var(--muted); font-weight: 400; }
+  .folder-row .meta { color: var(--muted); font-size: 13px; white-space: nowrap; }
+  .folder-row .open::after { content: "\203A"; color: var(--muted); font-size: 22px; margin-left: 8px; }
+
   .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; }
   .card { position: relative; background: var(--panel); border: 2px solid transparent; border-radius: 12px; overflow: hidden; }
   .card.current { border-color: var(--accent); }
   .card .shot { display: block; width: 100%; padding: 0; border: 0; border-radius: 0; background: #000; }
   .card img { display: block; width: 100%; aspect-ratio: var(--frame, 16 / 9); object-fit: contain; }
-  .badge {
-    display: none; position: absolute; top: 6px; left: 6px; padding: 2px 8px; border-radius: 999px;
-    background: var(--accent); color: #15120a; font-size: 12px; font-weight: 600;
-  }
-  .card.current .badge { display: block; }
-  .name { padding: 6px 8px 0; font-size: 12px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .actions { display: flex; gap: 6px; padding: 8px; }
-  .actions button { flex: 1; padding: 6px; font-size: 14px; min-height: 40px; }
-  .actions .danger { flex: 0 0 44px; }
+  .card.off img, .grid.folder-off img { opacity: .35; }
+  .badge { display: none; position: absolute; top: 6px; left: 6px; padding: 2px 8px; border-radius: 999px;
+    background: var(--accent); color: #15120a; font-size: 12px; font-weight: 600; }
+  .badge.offtag { background: var(--raised); color: var(--muted); border: 1px solid var(--line); }
+  .card.current .badge.now, .card.off .badge.offtag { display: block; }
+  .card.current.off .badge.offtag { display: none; }
+  .foot { display: flex; align-items: center; gap: 8px; padding: 8px; }
+  .foot .name { flex: 1; min-width: 0; font-size: 12px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .empty { display: none; text-align: center; color: var(--muted); padding: 48px 16px; }
+
+  dialog { width: min(440px, calc(100% - 32px)); padding: 16px; color: var(--text); background: var(--panel);
+    border: 1px solid var(--line); border-radius: 16px; }
+  dialog::backdrop { background: rgba(0, 0, 0, .65); }
+  dialog img { display: block; width: 100%; max-height: 40vh; object-fit: contain; background: #000; border-radius: 8px; }
+  dialog h3 { margin: 12px 0 4px; font-size: 16px; overflow-wrap: anywhere; }
+  .sheet { display: flex; flex-direction: column; gap: 8px; margin-top: 12px; }
+  .sheet button { justify-content: flex-start; }
 
   .controls {
     position: fixed; left: 0; right: 0; bottom: 0; z-index: 5; display: flex; justify-content: center; gap: 10px;
@@ -90,9 +130,8 @@
   }
   .toast.show { opacity: 1; }
   .toast.error { border-color: var(--danger); color: #ffd6d6; }
-  body.dragging main { outline: 2px dashed var(--accent); outline-offset: -8px; border-radius: 16px; }
+  body.dragging #folder-view { outline: 2px dashed var(--accent); outline-offset: 8px; border-radius: 16px; }
   @media (max-width: 420px) {
-    .upload-label { display: none; }
     .controls button { flex-direction: column; gap: 2px; font-size: 12px; }
   }
 </style>
@@ -102,31 +141,58 @@
   <div class="bar">
     <h1>Presenter</h1>
     <div class="status"><i class="dot" id="dot"></i><span id="status">Connecting...</span></div>
-    <button id="upload-btn" title="Upload images">
-      <svg viewBox="0 0 24 24"><path d="M11 16V7.8l-3.6 3.6L6 10l6-6 6 6-1.4 1.4L13 7.8V16zM5 18h14v2H5z"/></svg>
-      <span class="upload-label">Upload</span>
-    </button>
-    <input type="file" id="file-input" accept=".jpg,.jpeg,.png,.webp,.gif,image/jpeg,image/png,image/webp,image/gif" multiple hidden>
   </div>
   <div class="banner" id="pin-banner">
-    <span id="pin-text"></span>
+    <span>Only this image is on screen. Next and Previous are off until you resume.</span>
     <button class="primary" id="resume-btn">Resume slideshow</button>
   </div>
   <div class="banner error" id="error-banner"><span id="error-text"></span></div>
 </header>
 
 <main>
-  <div class="segmented" id="folders">
+  <div class="segmented" id="formats">
     {% for name, label, ratio in formats %}
-    <button data-folder="{{ name }}" data-label="{{ label }}" data-ratio="{{ ratio }}">
+    <button data-format="{{ name }}" data-label="{{ label }}" data-ratio="{{ ratio }}">
       {{ label }} <span class="count"></span>
       {% if name == on_screen %}<span class="tag">on screen</span>{% endif %}
     </button>
     {% endfor %}
   </div>
-  <p class="note" id="folder-note"></p>
-  <div class="grid" id="grid"></div>
-  <p class="empty" id="empty">No images in this folder yet. Tap Upload (or drop files here) to add some.</p>
+  <p class="note" id="format-note"></p>
+
+  <section id="library-view">
+    <div class="panel" id="settings">
+      <label class="field">Seconds per slide
+        <input type="number" id="duration" min="1" max="3600" step="1" inputmode="decimal">
+      </label>
+      <label class="field">Shuffle <input type="checkbox" class="toggle" id="shuffle"></label>
+    </div>
+    <div class="section-head">
+      <h2>Folders</h2>
+      <button id="new-folder-btn">+ New folder</button>
+    </div>
+    <p class="note" id="folders-note"></p>
+    <div id="folder-list"></div>
+    <p class="empty" id="no-folders">No folders yet. Create one with + New folder.</p>
+  </section>
+
+  <section id="folder-view" hidden>
+    <div class="section-head">
+      <button id="back-btn" title="Back to the folders">&#8249; Folders</button>
+      <h2 id="folder-title"></h2>
+      <input type="checkbox" class="toggle" id="folder-on" title="Play this folder in the slideshow">
+    </div>
+    <div class="tools">
+      <button class="primary" id="upload-btn">
+        <svg viewBox="0 0 24 24"><path d="M11 16V7.8l-3.6 3.6L6 10l6-6 6 6-1.4 1.4L13 7.8V16zM5 18h14v2H5z"/></svg>Upload
+      </button>
+      <button id="solo-btn">Play only this folder</button>
+      <button class="danger" id="delete-folder-btn">Delete folder</button>
+    </div>
+    <p class="note" id="folder-note"></p>
+    <div class="grid" id="grid"></div>
+    <p class="empty" id="empty">No slides here yet. Tap Upload (or drop files here) to add some.</p>
+  </section>
 </main>
 
 <nav class="controls">
@@ -141,32 +207,56 @@
   </button>
 </nav>
 
+<dialog id="slide-dialog">
+  <img id="sd-img" alt="">
+  <h3 id="sd-name"></h3>
+  <p class="note" id="sd-note"></p>
+  <div class="sheet" id="sd-actions">
+    <button class="primary" id="sd-show">Show now</button>
+    <button id="sd-pin">Show only this</button>
+    <button id="sd-switch"></button>
+    <button id="sd-move">Move to another folder</button>
+    <button class="danger" id="sd-delete">Delete</button>
+    <button id="sd-close">Close</button>
+  </div>
+  <div class="sheet" id="sd-targets" hidden></div>
+</dialog>
+
+<input type="file" id="file-input" accept=".jpg,.jpeg,.png,.webp,.gif,image/jpeg,image/png,image/webp,image/gif" multiple hidden>
 <div class="toast" id="toast"></div>
 
+<template id="folder-template">
+  <div class="folder-row">
+    <input type="checkbox" class="toggle" title="Play this folder in the slideshow">
+    <button class="open"><span class="fname"></span><span class="meta"></span></button>
+  </div>
+</template>
 <template id="card-template">
   <div class="card">
-    <button class="shot" title="Show this image now"><img alt="" loading="lazy" decoding="async"></button>
-    <span class="badge">On screen</span>
-    <div class="name"></div>
-    <div class="actions">
-      <button class="pin" title="Show only this image, no slideshow">Only this</button>
-      <button class="delete danger" title="Delete image">
-        <svg viewBox="0 0 24 24"><path d="M9 3h6l1 2h4v2H4V5h4zM6 9h12l-1 12H7zm4 2v8h1.5v-8zm2.5 0v8H14v-8z"/></svg>
-      </button>
+    <button class="shot" title="Show, move or delete"><img alt="" loading="lazy" decoding="async"></button>
+    <span class="badge now">On screen</span><span class="badge offtag">Off</span>
+    <div class="foot">
+      <span class="name"></span>
+      <input type="checkbox" class="toggle small" title="Show this slide in the slideshow">
     </div>
   </div>
 </template>
 
 <script>
   const MAX_UPLOAD_MB = {{ max_upload_mb }};
-  const ON_SCREEN = "{{ on_screen }}";  // the folder this Pi's screen plays
+  const ON_SCREEN = "{{ on_screen }}";  // the format this Pi's screen shows
   const ICON_PAUSE = "M7 5h4v14H7zM13 5h4v14h-4z", ICON_PLAY = "M8 5v14l11-7z";
   const $ = (id) => document.getElementById(id);
-  const tab = (folder) => document.querySelector(`#folders [data-folder="${folder}"]`);
-  let state = {}, images = {}, imagesKey = "", view = ON_SCREEN, toastTimer;
+  const enc = encodeURIComponent;
+  const tab = (f) => document.querySelector(`#formats [data-format="${f}"]`);
+  let lib = null, libKey = "", state = {}, fmt = ON_SCREEN, folder = null, toastTimer;
 
   async function api(method, url, body) {
-    const res = await fetch(url, { method, body, headers: { "X-Requested-With": "presenter" } });
+    const json = body !== undefined && !(body instanceof FormData);
+    const res = await fetch(url, {
+      method, body: json ? JSON.stringify(body) : body,
+      headers: { "X-Requested-With": "presenter", ...(json ? { "Content-Type": "application/json" } : {}) },
+    });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(data.error || `${res.status} ${res.statusText}`);
     return data;
@@ -180,9 +270,15 @@
     toastTimer = setTimeout(() => el.classList.remove("show"), isError ? 5000 : 2500);
   }
 
-  async function act(url, method = "POST") {
-    try { await api(method, url); } catch (e) { toast(e.message, true); }
-    await refreshStatus();
+  // Do something on the Pi, then show the result. Returns the answer, or null on errors.
+  async function act(method, url, body, message) {
+    let data = null;
+    try {
+      data = await api(method, url, body);
+      if (message) toast(message);
+    } catch (e) { toast(e.message, true); }
+    await Promise.all([refreshLibrary(), refreshStatus()]);
+    return data;
   }
 
   async function refreshStatus() {
@@ -191,70 +287,160 @@
     renderStatus();
   }
 
-  async function refreshImages() {
+  async function refreshLibrary() {
     try {
-      const data = await api("GET", "/api/images");
+      const data = await api("GET", "/api/library");
       const key = JSON.stringify(data);
-      if (key !== imagesKey) { imagesKey = key; images = data; renderGrid(); }
+      if (key !== libKey) { libKey = key; lib = data; render(); }
     } catch (e) { toast(e.message, true); }
+  }
+
+  // Where we are lives in the address (#flat or #flat/Folder), so Back and reload work.
+  function go(f, name) { location.hash = name == null ? f : `${f}/${enc(name)}`; }
+  function readHash() {
+    const [f, ...rest] = location.hash.slice(1).split("/");
+    fmt = tab(f) ? f : ON_SCREEN;
+    folder = rest.length ? decodeURIComponent(rest.join("/")) : null;
+    render();
+  }
+  window.addEventListener("hashchange", readHash);
+
+  const folderUrl = (f, name) => `/api/folders/${f}/${enc(name)}`;
+  const slideUrl = (f, name, slide) => `/api/slides/${f}/${enc(name)}/${enc(slide)}`;
+  const thumbUrl = (f, name, s) => `/thumb/${f}/${enc(name)}/${enc(s.name)}?v=${s.mtime}`;
+
+  function render() {
+    if (!lib) return;
+    document.querySelectorAll("#formats button").forEach((b) => {
+      b.classList.toggle("active", b.dataset.format === fmt);
+      const total = lib.formats[b.dataset.format].reduce((n, f) => n + f.slides.length, 0);
+      b.querySelector(".count").textContent = `(${total})`;
+    });
+    $("format-note").textContent = fmt === ON_SCREEN ? "" :
+      `This screen shows ${tab(ON_SCREEN).dataset.label} slides. ${tab(fmt).dataset.label} slides are only stored here, for a ${tab(fmt).dataset.label} screen.`;
+    const folders = lib.formats[fmt];
+    const open = folders.find((f) => f.name === folder);
+    $("library-view").hidden = !!open;
+    $("folder-view").hidden = !open;
+    open ? renderFolder(open) : renderLibrary(folders);
+    renderStatus();
+  }
+
+  function renderLibrary(folders) {
+    $("settings").hidden = fmt !== ON_SCREEN;
+    if (document.activeElement !== $("duration")) $("duration").value = lib.duration;
+    $("shuffle").checked = lib.shuffle;
+    $("folders-note").textContent = folders.length ? "Folders that are switched on play in the slideshow. Tap a folder to see its slides." : "";
+    $("no-folders").style.display = folders.length ? "none" : "block";
+    $("folder-list").replaceChildren(...folders.map((f) => {
+      const row = $("folder-template").content.firstElementChild.cloneNode(true);
+      const off = f.slides.filter((s) => !s.on).length;
+      row.dataset.name = f.name;
+      row.classList.toggle("off", !f.on);
+      row.querySelector(".fname").textContent = f.name;
+      row.querySelector(".meta").textContent = `${f.slides.length} slide${f.slides.length === 1 ? "" : "s"}` + (off ? `, ${off} off` : "");
+      const toggle = row.querySelector(".toggle");
+      toggle.checked = f.on;
+      toggle.onchange = () => act("POST", folderUrl(fmt, f.name) + "/switch", { on: toggle.checked },
+        `"${f.name}" ${toggle.checked ? "plays" : "is switched off"}`);
+      row.querySelector(".open").onclick = () => go(fmt, f.name);
+      return row;
+    }));
+  }
+
+  function renderFolder(f) {
+    $("folder-title").textContent = f.name;
+    $("folder-on").checked = f.on;
+    $("delete-folder-btn").hidden = f.slides.length > 0;
+    $("folder-note").textContent = f.on ? "Use the switch on a slide to leave it out of the slideshow for now, e.g. once its event is over." :
+      "This folder is switched off, so none of its slides are shown.";
+    $("grid").classList.toggle("folder-off", !f.on);
+    $("grid").style.setProperty("--frame", tab(fmt).dataset.ratio);
+    $("empty").style.display = f.slides.length ? "none" : "block";
+    $("grid").replaceChildren(...f.slides.map((s) => {
+      const card = $("card-template").content.firstElementChild.cloneNode(true);
+      card.dataset.name = s.name;
+      card.classList.toggle("off", !s.on);
+      card.querySelector("img").src = thumbUrl(fmt, f.name, s);
+      card.querySelector("img").alt = s.name;
+      card.querySelector(".name").textContent = s.name;
+      card.querySelector(".name").title = s.name;
+      card.querySelector(".shot").onclick = () => openSlide(f, s);
+      const toggle = card.querySelector(".toggle");
+      toggle.checked = s.on;
+      toggle.onchange = () => act("POST", slideUrl(fmt, f.name, s.name) + "/switch", { on: toggle.checked },
+        `${s.name} ${toggle.checked ? "is back in" : "is left out of"} the slideshow`);
+      return card;
+    }));
   }
 
   function renderStatus() {
     const mode = state.offline ? "offline" : state.pinned ? "pinned" : state.paused ? "paused" : "playing";
-    const name = state.current || "nothing";
+    const now = state.current, name = now ? now.name : "nothing";
     $("dot").className = "dot " + mode;
     $("status").textContent = {
       offline: "Player not running", pinned: `Only this: ${name}`,
       paused: `Paused on ${name}`, playing: `Playing: ${name}`,
     }[mode];
+    $("status").title = now ? `${now.folder} / ${now.name}` : "";
     $("pin-banner").classList.toggle("show", mode === "pinned");
-    $("pin-text").textContent = "Only this image is on screen. Next and Previous are off until you resume.";
     $("error-banner").classList.toggle("show", mode === "offline");
-    $("error-text").textContent = `The slideshow player is not reachable. Images can still be managed. (${state.error || ""})`;
+    $("error-text").textContent = `The slideshow player is not reachable. Slides can still be managed. (${state.error || ""})`;
     $("pause-icon").setAttribute("d", state.paused ? ICON_PLAY : ICON_PAUSE);
     $("pause-label").textContent = state.paused ? "Play" : "Pause";
     $("pause-btn").disabled = mode === "offline";
     $("prev-btn").disabled = $("next-btn").disabled = mode === "offline" || mode === "pinned";
-    document.querySelectorAll(".card").forEach((card) => card.classList.toggle("current",
-      !state.offline && view === ON_SCREEN && card.dataset.name === state.current));
+    const here = !state.offline && now && fmt === ON_SCREEN;
+    document.querySelectorAll(".folder-row").forEach((row) =>
+      row.classList.toggle("current", here && row.dataset.name === now.folder));
+    document.querySelectorAll(".card").forEach((card) =>
+      card.classList.toggle("current", here && folder === now.folder && card.dataset.name === now.name));
   }
 
-  function renderGrid() {
-    const folder = view, label = tab(folder).dataset.label, list = images[folder] || [];
-    const stored = folder !== ON_SCREEN;  // kept on this Pi for a screen of the other format
-    document.querySelectorAll("#folders button").forEach((b) => {
-      b.classList.toggle("active", b.dataset.folder === folder);
-      b.querySelector(".count").textContent = `(${(images[b.dataset.folder] || []).length})`;
-    });
-    $("folder-note").textContent = stored
-      ? `This screen plays ${tab(ON_SCREEN).dataset.label} slides. ${label} slides are only stored here, for a ${label} screen.`
-      : "";
-    // Thumbnails take the shape of the folder's format, as a preview of the screen.
-    $("grid").style.setProperty("--frame", tab(folder).dataset.ratio);
-    $("grid").replaceChildren(...list.map(({ name, mtime }) => {
-      const card = $("card-template").content.firstElementChild.cloneNode(true);
-      const url = encodeURIComponent(name);
-      card.dataset.name = name;
-      card.classList.toggle("stored", stored);
-      card.querySelector("img").src = `/thumb/${folder}/${url}?v=${mtime}`;
-      card.querySelector("img").alt = name;
-      card.querySelector(".name").textContent = name;
-      card.querySelector(".name").title = name;
-      card.querySelector(".shot").onclick = () => act(`/api/show/${url}`);
-      card.querySelector(".pin").onclick = () => act(`/api/pin/${url}`);
-      card.querySelector(".delete").onclick = async () => {
-        if (!confirm(`Delete "${name}" from ${label}?`)) return;
-        await act(`/api/images/${folder}/${url}`, "DELETE");
-        await refreshImages();
-      };
-      return card;
-    }));
-    $("empty").style.display = list.length ? "none" : "block";
-    renderStatus();
+  // --- The slide sheet: show, keep on screen, switch off, move, delete ---
+  function openSlide(f, s) {
+    const dialog = $("slide-dialog"), base = slideUrl(fmt, f.name, s.name);
+    const onScreen = fmt === ON_SCREEN, playable = onScreen && f.on && s.on;
+    const close = () => dialog.close();
+    $("sd-img").src = thumbUrl(fmt, f.name, s);
+    $("sd-name").textContent = s.name;
+    $("sd-note").textContent = !onScreen ? "" : !s.on ? "Switched off: not in the slideshow." :
+      !f.on ? "Its folder is switched off: not in the slideshow." : "";
+    $("sd-show").hidden = $("sd-pin").hidden = !onScreen;
+    $("sd-show").disabled = !playable;
+    $("sd-switch").textContent = s.on ? "Turn off (leave out of the slideshow)" : "Turn on (back into the slideshow)";
+    const others = lib.formats[fmt].filter((x) => x.name !== f.name);
+    $("sd-move").hidden = !others.length;
+    $("sd-actions").hidden = false;
+    $("sd-targets").hidden = true;
+    $("sd-show").onclick = () => { close(); act("POST", `/api/show/${enc(f.name)}/${enc(s.name)}`); };
+    $("sd-pin").onclick = () => { close(); act("POST", `/api/pin/${enc(f.name)}/${enc(s.name)}`); };
+    $("sd-switch").onclick = () => { close(); act("POST", base + "/switch", { on: !s.on },
+      `${s.name} ${s.on ? "is left out of" : "is back in"} the slideshow`); };
+    $("sd-delete").onclick = () => {
+      if (!confirm(`Delete "${s.name}"?`)) return;
+      close();
+      act("DELETE", base, undefined, `Deleted ${s.name}`);
+    };
+    $("sd-close").onclick = close;
+    $("sd-move").onclick = () => {
+      const cancel = document.createElement("button");
+      cancel.textContent = "Cancel";
+      cancel.onclick = close;
+      $("sd-targets").replaceChildren(...others.map((x) => {
+        const b = document.createElement("button");
+        b.textContent = `Move to ${x.name}`;
+        b.onclick = () => { close(); act("POST", base + "/move", { to: x.name }, `Moved ${s.name} to ${x.name}`); };
+        return b;
+      }), cancel);
+      $("sd-actions").hidden = true;
+      $("sd-targets").hidden = false;
+    };
+    dialog.showModal();
   }
 
   async function upload(files) {
-    const folder = view, label = tab(folder).dataset.label;
+    const f = fmt, name = folder;
     files = [...files];
     let done = 0;
     for (const file of files) {
@@ -262,44 +448,65 @@
         toast(`${file.name} is larger than ${MAX_UPLOAD_MB} MB, skipped`, true);
         continue;
       }
-      toast(`Uploading to ${label}, ${done + 1} of ${files.length}: ${file.name}`);
+      toast(`Uploading to ${name}, ${done + 1} of ${files.length}: ${file.name}`);
       const form = new FormData();
       form.append("files", file);
-      try { await api("POST", `/api/upload/${folder}`, form); done++; }
+      try { await api("POST", `/api/upload/${f}/${enc(name)}`, form); done++; }
       catch (e) { toast(`${file.name}: ${e.message}`, true); }
     }
-    if (done) toast(`Uploaded ${done} image${done > 1 ? "s" : ""} to ${label}`);
-    await refreshImages();
-    await refreshStatus();
+    if (done) toast(`Uploaded ${done} image${done > 1 ? "s" : ""} to ${name}`);
+    await Promise.all([refreshLibrary(), refreshStatus()]);
   }
 
-  $("prev-btn").onclick = () => act("/api/player/prev");
-  $("next-btn").onclick = () => act("/api/player/next");
-  $("pause-btn").onclick = () => act(state.paused ? "/api/player/play" : "/api/player/pause");
-  $("resume-btn").onclick = () => act("/api/resume");
-  document.querySelectorAll("#folders button").forEach((b) => {
-    b.onclick = () => { view = b.dataset.folder; renderGrid(); };
-  });
+  $("prev-btn").onclick = () => act("POST", "/api/player/prev");
+  $("next-btn").onclick = () => act("POST", "/api/player/next");
+  $("pause-btn").onclick = () => act("POST", state.paused ? "/api/player/play" : "/api/player/pause");
+  $("resume-btn").onclick = () => act("POST", "/api/resume");
+  document.querySelectorAll("#formats button").forEach((b) => { b.onclick = () => go(b.dataset.format); });
+  $("duration").onchange = () => {
+    const seconds = Number($("duration").value);
+    act("POST", "/api/settings", { duration: seconds }, `Each slide now shows for ${seconds} s`);
+  };
+  $("shuffle").onchange = () => act("POST", "/api/settings", { shuffle: $("shuffle").checked },
+    $("shuffle").checked ? "Shuffle on: slides play in random order" : "Shuffle off: slides play in order");
+  $("new-folder-btn").onclick = async () => {
+    const name = prompt("Name of the new folder:");
+    if (!name || !name.trim()) return;
+    const made = await act("POST", `/api/folders/${fmt}`, { name }, `Folder created`);
+    if (made) go(fmt, made.name);
+  };
+  $("back-btn").onclick = () => go(fmt);
+  $("folder-on").onchange = () => act("POST", folderUrl(fmt, folder) + "/switch", { on: $("folder-on").checked },
+    `"${folder}" ${$("folder-on").checked ? "plays" : "is switched off"}`);
+  $("solo-btn").onclick = () => act("POST", folderUrl(fmt, folder) + "/switch", { on: true, only: true },
+    `Only "${folder}" plays now`);
+  $("delete-folder-btn").onclick = async () => {
+    if (!confirm(`Delete the empty folder "${folder}"?`)) return;
+    if (await act("DELETE", folderUrl(fmt, folder), undefined, "Folder deleted")) go(fmt);
+  };
   $("upload-btn").onclick = () => $("file-input").click();
   $("file-input").onchange = (e) => { upload(e.target.files); e.target.value = ""; };
 
-  // Drag and drop files anywhere on the page (desktop browsers).
+  // Drag and drop files onto an open folder (desktop browsers).
   let dragDepth = 0;
-  document.addEventListener("dragenter", (e) => { e.preventDefault(); dragDepth++; document.body.classList.add("dragging"); });
+  const canDrop = () => folder && !$("folder-view").hidden;
+  document.addEventListener("dragenter", (e) => { e.preventDefault(); dragDepth++; document.body.classList.toggle("dragging", !!canDrop()); });
   document.addEventListener("dragleave", () => { if (--dragDepth <= 0) { dragDepth = 0; document.body.classList.remove("dragging"); } });
   document.addEventListener("dragover", (e) => e.preventDefault());
   document.addEventListener("drop", (e) => {
     e.preventDefault();
     dragDepth = 0;
     document.body.classList.remove("dragging");
+    if (!canDrop()) return toast("Open a folder first, then drop the files on it", true);
     if (e.dataTransfer.files.length) upload(e.dataTransfer.files);
   });
 
   // Keep the page in sync with the screen and with other staff members' changes.
   setInterval(() => { if (!document.hidden) refreshStatus(); }, 2000);
-  setInterval(() => { if (!document.hidden) refreshImages(); }, 10000);
-  document.addEventListener("visibilitychange", () => { if (!document.hidden) { refreshStatus(); refreshImages(); } });
-  refreshImages().then(refreshStatus);
+  setInterval(() => { if (!document.hidden) refreshLibrary(); }, 10000);
+  document.addEventListener("visibilitychange", () => { if (!document.hidden) { refreshStatus(); refreshLibrary(); } });
+  readHash();
+  refreshLibrary().then(refreshStatus);
 </script>
 </body>
 </html>
