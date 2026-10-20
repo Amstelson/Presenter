@@ -67,6 +67,9 @@ if command -v raspi-config >/dev/null 2>&1; then
     sudo raspi-config nonint do_blanking 1
 fi
 
+echo "==> Never going to sleep (a slideshow screen must stay on)"
+sudo systemctl mask sleep.target suspend.target hibernate.target hybrid-sleep.target >/dev/null 2>&1 || true
+
 if [ -n "${WAYLAND_DISPLAY:-}${DISPLAY:-}" ]; then
     systemctl --user import-environment DISPLAY WAYLAND_DISPLAY XAUTHORITY
     systemctl --user restart presenter-mpv.service

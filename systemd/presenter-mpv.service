@@ -15,6 +15,7 @@ EnvironmentFile=-%h/.config/presenter.env
 ExecStartPre=/usr/bin/mkdir -p %h/.config/presenter
 ExecStartPre=/usr/bin/touch %h/.config/presenter/player.conf %h/.config/presenter/playlist.m3u8
 # --idle/--force-window: keep a black fullscreen window even with no images
+# --stop-screensaver=always: no screensaver or screen lock, also when paused
 # --profile: frame every image as DCI Flat or Scope (see mpv/formats.conf)
 # player.conf and playlist.m3u8 are written by the web app: the seconds per
 # slide and the slideshow (switched-on folders and slides, maybe shuffled)
@@ -22,6 +23,7 @@ ExecStart=/usr/bin/mpv --fs --idle=yes --force-window=yes \
     --loop-playlist=inf --image-display-duration=${PRESENTER_DURATION} \
     --input-ipc-server=${PRESENTER_SOCKET} \
     --no-osc --osd-level=0 --cursor-autohide=always --no-audio --no-terminal \
+    --stop-screensaver=always \
     --include=%h/presenter/mpv/formats.conf --profile=${PRESENTER_FORMAT} \
     --include=%h/.config/presenter/player.conf \
     %h/.config/presenter/playlist.m3u8

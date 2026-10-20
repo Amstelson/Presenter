@@ -76,8 +76,9 @@ sudo loginctl enable-linger "$USER"
 systemctl --user daemon-reload
 systemctl --user enable --now presenter-web.service
 
-# 5. Keep the screen on
+# 5. Keep the screen on, and never go to sleep
 sudo raspi-config nonint do_blanking 1
+sudo systemctl mask sleep.target suspend.target hibernate.target hybrid-sleep.target
 ```
 
 `python3-pil` (thumbnails) and `python3-waitress` (a sturdier web server) are optional. Without them the app still works, using full images as thumbnails and Flask's built-in server.
@@ -239,13 +240,27 @@ Raspberry Pi OS images for the Pi do not boot in an x86 VM. Debian 13 is what Ra
    - **GNOME** to test Wayland (GNOME uses Wayland by default)
 
    You can do one, then reinstall with the other, or clone the VM.
-3. Turn on auto login: on Xfce, set `autologin-user=<you>` under `[Seat:*]` in `/etc/lightdm/lightdm.conf`. On GNOME, use Settings > Users > Automatic Login. Turn off screen blanking in the desktop's power settings.
+3. Turn on auto login: on Xfce, set `autologin-user=<you>` under `[Seat:*]` in `/etc/lightdm/lightdm.conf`. On GNOME, use Settings > Users > Automatic Login.
+
+   Then turn off the screen lock and screen blanking. Unlike Raspberry Pi OS, these desktops lock an idle screen, which looks like being logged out. In a terminal on the VM's desktop:
+
+   ```sh
+   # GNOME
+   gsettings set org.gnome.desktop.screensaver lock-enabled false
+   gsettings set org.gnome.desktop.session idle-delay 0
+   gsettings set org.gnome.settings-daemon.plugins.power sleep-inactive-ac-type nothing
+
+   # Xfce: remove the screen lockers, then in Settings > Power Manager set
+   # every "Blank after", "Put to sleep after" and "Switch off after" to Never
+   sudo apt remove light-locker xfce4-screensaver
+   ```
 4. Install as on the Pi: `sudo apt install git`, clone into `~/presenter`, run `./install.sh` (the Pi-only screen blanking step is skipped automatically).
 5. Watch the "TV" in the Proxmox console and open `http://<vm-ip>:8888` on your phone.
 
 Checklist (use the same one on the Pi):
 
 - [ ] After a reboot the slideshow comes up fullscreen without any clicks.
+- [ ] Left alone overnight, and paused for an hour, the screen shows the slide: no lock screen, no blank screen, no sleep.
 - [ ] Previous / Pause / Play / Next, Show now, Show only this and Resume slideshow all change the screen within a second.
 - [ ] Upload from a phone (several files at once) and delete work. A `.txt` file and a file over 50 MB are refused.
 - [ ] The screen shows only the slides of its own format, in the right frame. Uploading to the other tab changes nothing on screen.
@@ -270,6 +285,7 @@ journalctl --user -u presenter-web -n 50              # web app log
 ```
 
 - **The page says "Player not running":** run `systemctl --user restart presenter-mpv`. This also works over SSH once the desktop has started.
+- **A lock or login screen appears after a while:** that is the desktop locking an idle screen, or the machine going to sleep. Raspberry Pi OS does neither by default. The installer stops sleep for good, and mpv keeps screensavers away while it runs (`--stop-screensaver=always`), even when paused. For desktops that lock anyway (GNOME, Xfce on the test VM), turn the lock off as in the VM steps under Testing. To find out what happened: `journalctl -b | grep -iE "suspend|sleep"` shows sleep, and if the slideshow is still running after you unlock, it was only the lock.
 - **No slideshow after boot:** check that desktop auto login is on. If the desktop ignores `~/.config/autostart`, add this line to `~/.config/labwc/autostart` (labwc) or the `[autostart]` section of `~/.config/wayfire.ini` (wayfire):
 
   ```sh
@@ -292,6 +308,7 @@ journalctl --user -u presenter-web -n 50              # web app log
 systemctl --user disable --now presenter-web presenter-mpv presenter-hdmi
 rm ~/.config/autostart/presenter-mpv.desktop ~/.config/systemd/user/presenter-*.service
 systemctl --user daemon-reload
+sudo systemctl unmask sleep.target suspend.target hibernate.target hybrid-sleep.target  # allow sleep again
 ```
 
 ## Files
