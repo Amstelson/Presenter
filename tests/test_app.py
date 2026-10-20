@@ -112,6 +112,15 @@ def wait_for(client, **expected):
     raise AssertionError(f"status {state} never matched {expected}")
 
 
+def eventually(check, what):
+    """Wait for check() to be true: mpv loads files in the background."""
+    for _ in range(40):
+        if check():
+            return
+        time.sleep(0.1)
+    raise AssertionError(f"never happened: {what}")
+
+
 def at(folder, name):
     return {"folder": folder, "name": name}
 
@@ -167,7 +176,7 @@ def test_library_lists_folders_and_tidies_loose_images(env):
 def test_player_starts_with_the_playlist_file(env):
     app, _, _, _ = env
     assert playlist_file(app) == ALL_FLAT
-    assert playing(app) == ALL_FLAT
+    eventually(lambda: playing(app) == ALL_FLAT, "mpv plays the playlist file")
 
 
 def test_flat_profile_frames_exactly(env):
@@ -258,7 +267,7 @@ def test_switched_off_slide_cannot_be_shown_but_can_be_pinned(env):
     wait_for(client, pinned=True, current=at("Kids", "slide10.jpg"))
     post(client, "/api/resume")  # not in the slideshow, so the next due slide follows
     wait_for(client, pinned=False)
-    assert status(client)["current"] != at("Kids", "slide10.jpg")
+    eventually(lambda: status(client)["current"] != at("Kids", "slide10.jpg"), "another slide follows")
 
 
 def test_switching_off_the_slide_on_screen_moves_on(env):
@@ -378,12 +387,50 @@ def test_delete_slide(env):
     assert all("Stastny_film-1" not in key for key in app.state["slides_off"])  # forgotten
 
 
-def test_delete_folder_only_when_empty(env):
+def test_delete_folder(env):
     _, client, slides, _ = env
-    assert client.delete("/api/folders/flat/Vianoce 2026", headers=POST).status_code == 409
+    assert client.delete("/api/folders/flat/Vianoce 2026", headers=POST).status_code == 409  # not empty
     client.delete("/api/slides/flat/Vianoce 2026/Stastny_film.png", headers=POST)
     assert client.delete("/api/folders/flat/Vianoce 2026", headers=POST).status_code == 200
     assert not (slides / "flat" / "Vianoce 2026").exists()
+
+
+def test_several_slides_at_once(env):
+    app, client, slides, _ = env
+    post(client, "/api/folders/flat", {"name": "Batch"})
+    post(client, "/api/folders/flat", {"name": "Archive"})
+    for name in ("b1.jpg", "b2.jpg", "b3.jpg", "b4.jpg"):
+        upload(client, "flat", "Batch", make_image(), name)
+    url = "/api/slides/flat/Batch"
+    res = post(client, url, {"names": ["b1.jpg", "b2.jpg", "gone.jpg", "b1.jpg"], "action": "off"})
+    assert res.get_json() == {"done": 2, "skipped": 2}  # a missing name and a repeat are skipped
+    assert "Batch/b1.jpg" not in playing(app) and "Batch/b3.jpg" in playing(app)
+    post(client, url, {"names": ["b1.jpg", "b2.jpg", "b3.jpg"], "action": "move", "to": "Archive"})
+    assert sorted(os.listdir(slides / "flat" / "Archive")) == ["b1.jpg", "b2.jpg", "b3.jpg"]
+    archive = next(f for f in library(client)["formats"]["flat"] if f["name"] == "Archive")
+    assert [s["on"] for s in archive["slides"]] == [False, False, True]  # off stays off
+    post(client, "/api/slides/flat/Archive", {"names": ["b1.jpg", "b2.jpg"], "action": "on"})
+    assert "Archive/b1.jpg" in playing(app)
+    post(client, "/api/slides/flat/Archive", {"names": ["b1.jpg", "b3.jpg"], "action": "delete"})
+    assert os.listdir(slides / "flat" / "Archive") == ["b2.jpg"]
+    assert "Archive/b1.jpg" not in playing(app)
+    assert post(client, url, {"names": ["b4.jpg"], "action": "explode"}).status_code == 400
+    assert post(client, url, {"names": "b4.jpg", "action": "delete"}).status_code == 400
+    assert post(client, url, {"names": ["b4.jpg"], "action": "move", "to": "Nope"}).status_code == 404
+    assert (slides / "flat" / "Batch" / "b4.jpg").exists()  # nothing touched by the bad requests
+
+
+def test_delete_folder_with_its_slides(env):
+    app, client, slides, _ = env
+    post(client, "/api/slides/flat/Archive/b2.jpg/switch", {"on": False})
+    client.get("/thumb/flat/Archive/b2.jpg", headers=AUTH)  # make a cached thumbnail
+    res = client.delete("/api/folders/flat/Archive?with_slides=1", headers=POST)
+    assert res.status_code == 200
+    assert not (slides / "flat" / "Archive").exists()
+    assert not os.path.exists(os.path.join(app.THUMB_DIR, "flat", "Archive"))
+    assert all(not k.startswith("flat/Archive") for k in app.state["slides_off"])
+    assert all(not p.startswith("Archive/") for p in playing(app))
+    client.delete("/api/folders/flat/Batch?with_slides=1", headers=POST)
 
 
 def test_files_copied_in_or_removed_outside_the_page(env):
@@ -425,7 +472,7 @@ def test_restart_brings_back_slideshow_and_duration(env):
     post(client, "/api/slides/flat/General/loose.jpg/switch", {"on": False})
     player.stop()
     player.start()  # like systemd restarting mpv, or a reboot
-    wait_for(client, pinned=False)
+    eventually(lambda: playing(app) == playlist_file(app), "mpv plays the saved slideshow")
     assert "General/loose.jpg" not in playing(app)
     assert app.mpv(["get_property", "image-display-duration"])[0] == 15
     frame(app.mpv, FLAT_RATIO)

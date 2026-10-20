@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Name=Start Presenter
+Comment=Start (or restart) the slideshow and its web page, also after every reboot
+Exec="@APP_DIR@/presenter.sh" start --wait
+Icon=media-playback-start
+Terminal=true

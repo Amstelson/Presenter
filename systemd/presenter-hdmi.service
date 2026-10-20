@@ -3,6 +3,8 @@ Description=Presenter HDMI mode keeper (does nothing unless PRESENTER_HDMI_MODE 
 # Started together with the slideshow player (Wants= in presenter-mpv.service),
 # because it needs the desktop session too.
 PartOf=presenter-mpv.service
+# Stays off after Stop Presenter (presenter.sh stop) until Start Presenter.
+ConditionPathExists=!%h/.config/presenter/stopped
 
 [Service]
 Environment=PYTHONUNBUFFERED=1 PRESENTER_HDMI_MODE=

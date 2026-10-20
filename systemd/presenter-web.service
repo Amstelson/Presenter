@@ -1,5 +1,7 @@
 [Unit]
 Description=Presenter web remote (http://<pi-ip>:8888)
+# Stays off after Stop Presenter (presenter.sh stop) until Start Presenter.
+ConditionPathExists=!%h/.config/presenter/stopped
 
 [Service]
 Environment=PYTHONUNBUFFERED=1

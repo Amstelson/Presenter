@@ -23,6 +23,18 @@ for unit in presenter-mpv.service presenter-hdmi.service presenter-web.service; 
 done
 cp "$APP_DIR/autostart/presenter-mpv.desktop" "$HOME/.config/autostart/"
 
+echo "==> Adding the Start Presenter and Stop Presenter icons to the desktop"
+DESKTOP_DIR=$(xdg-user-dir DESKTOP 2>/dev/null || true)
+[ -n "$DESKTOP_DIR" ] && [ "$DESKTOP_DIR" != "$HOME" ] || DESKTOP_DIR="$HOME/Desktop"
+mkdir -p "$DESKTOP_DIR"
+for icon in presenter-start presenter-stop; do
+    sed "s|@APP_DIR@|$APP_DIR|g" "$APP_DIR/desktop/$icon.desktop" > "$DESKTOP_DIR/$icon.desktop"
+    chmod +x "$DESKTOP_DIR/$icon.desktop"
+    # Xfce 4.18 and newer only run desktop launchers marked as trusted
+    gio set -t string "$DESKTOP_DIR/$icon.desktop" metadata::xfce-exe-checksum \
+        "$(sha256sum "$DESKTOP_DIR/$icon.desktop" | cut -d' ' -f1)" 2>/dev/null || true
+done
+
 if [ ! -f "$ENV_FILE" ]; then
     printf "Choose a password for the web page (leave empty for a random one): "
     stty -echo 2>/dev/null || true
@@ -55,6 +67,9 @@ for f in "$HOME"/slides/*; do
     esac
 done
 rm -f "$HOME/.config/presenter/mpv.conf"  # format file of an earlier version, no longer used
+
+# Installing means it should run: undo an earlier Stop Presenter.
+rm -f "$HOME/.config/presenter/stopped"
 
 # Start the user's services at boot, even before the desktop logs in.
 sudo loginctl enable-linger "$(id -un)"

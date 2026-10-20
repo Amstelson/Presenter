@@ -97,6 +97,19 @@ mpv needs the screen, so it cannot start before the desktop does. The autostart 
 
 After a power cut the Pi boots, logs into the desktop and both services come back on their own. The web app also copes with mpv restarting: it opens a fresh socket connection for every action.
 
+### Start Presenter and Stop Presenter icons
+
+The installer puts two icons on the desktop:
+
+- **Start Presenter** starts (or restarts) the slideshow and the web page, also if something went wrong before. From then on they start after every reboot again. A small window shows whether everything runs and the web page address, then closes after 20 seconds.
+- **Stop Presenter** asks "Are you sure?", then stops the slideshow and the web page **and keeps them off after reboots**, until Start Presenter is used.
+
+The same works in a terminal or over SSH: `~/presenter/presenter.sh start`, `stop` or `status`. Over SSH, start works once the Pi's desktop is up, since the slideshow needs the screen.
+
+Stop leaves a marker file, `~/.config/presenter/stopped`. While it exists, none of the Presenter services start. Start (and running `install.sh` again) removes it.
+
+On Xfce, the first double-click may warn about an "untrusted application launcher": choose **Mark executable** (the installer tries to mark them trusted already).
+
 ## Folders, switching slides off, shuffle and timing
 
 ```
@@ -105,7 +118,8 @@ After a power cut the Pi boots, logs into the desktop and both services come bac
 ~/slides/scope/Coming soon/dune.jpg
 ```
 
-- **Folders.** The start page lists this screen's folders. Each has a switch: switched-on folders play in the slideshow, switched-off ones are kept but not shown. **+ New folder** creates one. Tap a folder to open it: **Upload** adds slides to it, **Play only this folder** switches all the others off, and an empty folder can be deleted.
+- **Folders.** The start page lists this screen's folders. Each has a switch: switched-on folders play in the slideshow, switched-off ones are kept but not shown. **+ New folder** creates one. Tap a folder to open it: **Upload** adds slides to it, **Play only this folder** switches all the others off, and **Delete folder** deletes it with all its slides (after an "Are you sure?").
+- **Several slides at once.** In a folder, tap **Select**, tap the slides (or **Select all**), then **Move**, **Turn off**, **Turn on** or **Delete** them together. Deleting asks "Are you sure?" first.
 - **Switching slides off.** Every slide has its own switch. A switched-off slide stays in its folder (dimmed, marked "Off") but is left out of the slideshow until you switch it back on. Handy for events that are over, or slides that are not due yet.
 - **Tap a slide** for more: **Show now** jumps to it, **Show only this** keeps it on screen, **Move to another folder** and **Delete**. A switched-off slide can still be shown with **Show only this**.
 - **Seconds per slide** and **Shuffle** are on the start page and apply to the whole slideshow straight away. Shuffle mixes the order again whenever the slideshow changes.
@@ -220,7 +234,7 @@ The same defaults are at the top of `app.py`, along with the upload limit (`MAX_
 
 ### 1. Automated tests (any Debian or Ubuntu machine, about 2 minutes)
 
-The tests start a real mpv without a screen (`--vo=null`) and drive every button through the web API. They cover login, the cross-site request block, next/prev/pause, "only this", resume, upload (filename cleanup, wrong file types, size limit), delete, thumbnails, the exact Flat and Scope frames, keeping the two formats apart, folders (creating, switching, playing only one, deleting), switching slides off without disturbing the screen, moving slides, shuffle, seconds per slide, files copied in without the page, everything coming back after an mpv restart, and mpv being down. The HDMI tests switch modes on a headless labwc (Wayland) and an Xorg dummy display (X11): trying and switching back, keeping a mode, and setting it again after a change.
+The tests start a real mpv without a screen (`--vo=null`) and drive every button through the web API. They cover login, the cross-site request block, next/prev/pause, "only this", resume, upload (filename cleanup, wrong file types, size limit), delete, thumbnails, the exact Flat and Scope frames, keeping the two formats apart, folders (creating, switching, playing only one, deleting), switching slides off without disturbing the screen, moving slides, shuffle, seconds per slide, files copied in without the page, several slides at once (move, switch, delete), deleting a folder with its slides, everything coming back after an mpv restart, and mpv being down. The `presenter.sh` tests check what Start and Stop do, including the "Are you sure?" question and staying off after a reboot. The HDMI tests switch modes on a headless labwc (Wayland) and an Xorg dummy display (X11): trying and switching back, keeping a mode, and setting it again after a change.
 
 ```sh
 sudo apt install mpv python3-flask python3-pil python3-pytest
@@ -265,6 +279,8 @@ Checklist (use the same one on the Pi):
 - [ ] Upload from a phone (several files at once) and delete work. A `.txt` file and a file over 50 MB are refused.
 - [ ] The screen shows only the slides of its own format, in the right frame. Uploading to the other tab changes nothing on screen.
 - [ ] Folders: create one, upload into it, switch it off and on, Play only this folder. Move a slide between folders.
+- [ ] Select several slides: move them, turn them off and on, delete them (answer "no" once to the question). Delete a folder with slides in it.
+- [ ] Stop Presenter, reboot: nothing starts. Start Presenter: slideshow and web page are back, and come back after the next reboot too.
 - [ ] Switching a slide off removes it from the slideshow without a flicker. Seconds per slide and Shuffle take effect at once.
 - [ ] After a reboot, switched-off folders and slides, shuffle and seconds per slide are as you left them.
 - [ ] With `PRESENTER_HDMI_MODE` set: the mode is back after a reboot and, on the Pi, after the projector is turned off and on.
@@ -307,6 +323,7 @@ journalctl --user -u presenter-web -n 50              # web app log
 ```sh
 systemctl --user disable --now presenter-web presenter-mpv presenter-hdmi
 rm ~/.config/autostart/presenter-mpv.desktop ~/.config/systemd/user/presenter-*.service
+rm "$(xdg-user-dir DESKTOP)"/presenter-start.desktop "$(xdg-user-dir DESKTOP)"/presenter-stop.desktop
 systemctl --user daemon-reload
 sudo systemctl unmask sleep.target suspend.target hibernate.target hybrid-sleep.target  # allow sleep again
 ```
@@ -324,5 +341,8 @@ sudo systemctl unmask sleep.target suspend.target hibernate.target hybrid-sleep.
 | `systemd/presenter-web.service` | runs the web app at boot, restarts it if it stops |
 | `autostart/presenter-mpv.desktop` | starts the mpv service when the desktop is up |
 | `install.sh` | one-step install on the Pi |
+| `presenter.sh` | start, stop (and keep off) or check Presenter by hand |
+| `desktop/presenter-start.desktop`, `desktop/presenter-stop.desktop` | the Start Presenter and Stop Presenter desktop icons |
 | `tests/test_app.py` | end-to-end tests with a real headless mpv |
 | `tests/test_hdmi_mode.py` | HDMI mode tests on headless Wayland and X11 displays |
+| `tests/test_presenter_sh.py` | tests for `presenter.sh` with a stand-in systemctl |

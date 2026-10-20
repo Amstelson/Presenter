@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Name=Stop Presenter
+Comment=Stop the slideshow and its web page, and keep them off after reboots
+Exec="@APP_DIR@/presenter.sh" stop --wait
+Icon=media-playback-stop
+Terminal=true

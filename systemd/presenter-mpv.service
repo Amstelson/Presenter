@@ -7,6 +7,8 @@ StartLimitIntervalSec=120
 StartLimitBurst=10
 # Also start the HDMI mode keeper (it exits at once if no mode is set).
 Wants=presenter-hdmi.service
+# Stays off after Stop Presenter (presenter.sh stop) until Start Presenter.
+ConditionPathExists=!%h/.config/presenter/stopped
 
 [Service]
 # Defaults, can be overridden in ~/.config/presenter.env

@@ -104,6 +104,14 @@
   .badge.offtag { background: var(--raised); color: var(--muted); border: 1px solid var(--line); }
   .card.current .badge.now, .card.off .badge.offtag { display: block; }
   .card.current.off .badge.offtag { display: none; }
+  .check { display: none; position: absolute; top: 6px; right: 6px; width: 30px; height: 30px; border-radius: 50%;
+    border: 2px solid #fff; background: rgba(0, 0, 0, .45); color: #15120a; pointer-events: none; }
+  .check svg { display: none; width: 100%; height: 100%; }
+  body.selecting .check { display: block; }
+  body.selecting .foot .toggle { visibility: hidden; }
+  .card.selected { border-color: var(--accent); }
+  .card.selected .check { background: var(--accent); border-color: var(--accent); }
+  .card.selected .check svg { display: block; }
   .foot { display: flex; align-items: center; gap: 8px; padding: 8px; }
   .foot .name { flex: 1; min-width: 0; font-size: 12px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .empty { display: none; text-align: center; color: var(--muted); padding: 48px 16px; }
@@ -122,6 +130,16 @@
     background: rgba(16, 18, 23, .96); border-top: 1px solid var(--line);
   }
   .controls button { flex: 1; max-width: 170px; min-height: 52px; }
+  .selectbar { display: none; position: fixed; left: 0; right: 0; bottom: 0; z-index: 6;
+    padding: 10px 16px calc(10px + env(safe-area-inset-bottom));
+    background: rgba(16, 18, 23, .98); border-top: 1px solid var(--line); }
+  body.selecting .selectbar { display: block; }
+  body.selecting .controls { display: none; }
+  body.selecting { padding-bottom: calc(140px + env(safe-area-inset-bottom)); }
+  .selectbar .row { display: flex; align-items: center; gap: 8px; max-width: 720px; margin: 0 auto; }
+  .selectbar .row + .row { margin-top: 8px; }
+  .selectbar .row button { flex: 1; padding: 8px; }
+  #sel-count { flex: 1; font-weight: 600; }
   .toast {
     position: fixed; left: 50%; bottom: calc(96px + env(safe-area-inset-bottom)); transform: translateX(-50%);
     max-width: calc(100% - 32px); padding: 10px 16px; border-radius: 10px; background: var(--raised);
@@ -129,6 +147,7 @@
     opacity: 0; pointer-events: none; transition: opacity .2s; z-index: 10;
   }
   .toast.show { opacity: 1; }
+  body.selecting .toast { bottom: calc(150px + env(safe-area-inset-bottom)); }
   .toast.error { border-color: var(--danger); color: #ffd6d6; }
   body.dragging #folder-view { outline: 2px dashed var(--accent); outline-offset: 8px; border-radius: 16px; }
   @media (max-width: 420px) {
@@ -186,6 +205,7 @@
       <button class="primary" id="upload-btn">
         <svg viewBox="0 0 24 24"><path d="M11 16V7.8l-3.6 3.6L6 10l6-6 6 6-1.4 1.4L13 7.8V16zM5 18h14v2H5z"/></svg>Upload
       </button>
+      <button id="select-btn">Select</button>
       <button id="solo-btn">Play only this folder</button>
       <button class="danger" id="delete-folder-btn">Delete folder</button>
     </div>
@@ -207,6 +227,20 @@
   </button>
 </nav>
 
+<div class="selectbar" id="select-bar">
+  <div class="row">
+    <span id="sel-count"></span>
+    <button id="sel-all">Select all</button>
+    <button class="primary" id="sel-done">Done</button>
+  </div>
+  <div class="row">
+    <button id="sel-move">Move</button>
+    <button id="sel-off">Turn off</button>
+    <button id="sel-on">Turn on</button>
+    <button class="danger" id="sel-delete">Delete</button>
+  </div>
+</div>
+
 <dialog id="slide-dialog">
   <img id="sd-img" alt="">
   <h3 id="sd-name"></h3>
@@ -219,7 +253,11 @@
     <button class="danger" id="sd-delete">Delete</button>
     <button id="sd-close">Close</button>
   </div>
-  <div class="sheet" id="sd-targets" hidden></div>
+</dialog>
+
+<dialog id="pick-dialog">
+  <h3 id="pick-title"></h3>
+  <div class="sheet" id="pick-list"></div>
 </dialog>
 
 <input type="file" id="file-input" accept=".jpg,.jpeg,.png,.webp,.gif,image/jpeg,image/png,image/webp,image/gif" multiple hidden>
@@ -235,6 +273,7 @@
   <div class="card">
     <button class="shot" title="Show, move or delete"><img alt="" loading="lazy" decoding="async"></button>
     <span class="badge now">On screen</span><span class="badge offtag">Off</span>
+    <span class="check"><svg viewBox="0 0 24 24"><path d="M9.5 16.2 5.3 12l-1.4 1.4 5.6 5.6L20.1 8.4 18.7 7z"/></svg></span>
     <div class="foot">
       <span class="name"></span>
       <input type="checkbox" class="toggle small" title="Show this slide in the slideshow">
@@ -250,6 +289,7 @@
   const enc = encodeURIComponent;
   const tab = (f) => document.querySelector(`#formats [data-format="${f}"]`);
   let lib = null, libKey = "", state = {}, fmt = ON_SCREEN, folder = null, toastTimer;
+  let selecting = false, selected = new Set();  // picking several slides at once
 
   async function api(method, url, body) {
     const json = body !== undefined && !(body instanceof FormData);
@@ -301,6 +341,13 @@
     const [f, ...rest] = location.hash.slice(1).split("/");
     fmt = tab(f) ? f : ON_SCREEN;
     folder = rest.length ? decodeURIComponent(rest.join("/")) : null;
+    setSelecting(false);  // also renders
+  }
+
+  function setSelecting(on) {
+    selecting = on;
+    selected.clear();
+    document.body.classList.toggle("selecting", on);
     render();
   }
   window.addEventListener("hashchange", readHash);
@@ -322,6 +369,7 @@
     const open = folders.find((f) => f.name === folder);
     $("library-view").hidden = !!open;
     $("folder-view").hidden = !open;
+    if (!open && selecting) { selecting = false; selected.clear(); document.body.classList.remove("selecting"); }
     open ? renderFolder(open) : renderLibrary(folders);
     renderStatus();
   }
@@ -351,12 +399,14 @@
   function renderFolder(f) {
     $("folder-title").textContent = f.name;
     $("folder-on").checked = f.on;
-    $("delete-folder-btn").hidden = f.slides.length > 0;
+    $("select-btn").hidden = !f.slides.length;
+    selected = new Set([...selected].filter((n) => f.slides.some((s) => s.name === n)));
     $("folder-note").textContent = f.on ? "Use the switch on a slide to leave it out of the slideshow for now, e.g. once its event is over." :
       "This folder is switched off, so none of its slides are shown.";
     $("grid").classList.toggle("folder-off", !f.on);
     $("grid").style.setProperty("--frame", tab(fmt).dataset.ratio);
     $("empty").style.display = f.slides.length ? "none" : "block";
+    renderSelectBar(f);
     $("grid").replaceChildren(...f.slides.map((s) => {
       const card = $("card-template").content.firstElementChild.cloneNode(true);
       card.dataset.name = s.name;
@@ -365,13 +415,59 @@
       card.querySelector("img").alt = s.name;
       card.querySelector(".name").textContent = s.name;
       card.querySelector(".name").title = s.name;
-      card.querySelector(".shot").onclick = () => openSlide(f, s);
+      card.classList.toggle("selected", selected.has(s.name));
+      card.querySelector(".shot").onclick = () => {
+        if (!selecting) return openSlide(f, s);
+        selected.has(s.name) ? selected.delete(s.name) : selected.add(s.name);
+        card.classList.toggle("selected", selected.has(s.name));
+        renderSelectBar(f);
+      };
       const toggle = card.querySelector(".toggle");
       toggle.checked = s.on;
       toggle.onchange = () => act("POST", slideUrl(fmt, f.name, s.name) + "/switch", { on: toggle.checked },
         `${s.name} ${toggle.checked ? "is back in" : "is left out of"} the slideshow`);
       return card;
     }));
+  }
+
+  function renderSelectBar(f) {
+    const n = selected.size, all = n === f.slides.length;
+    $("sel-count").textContent = `${n} selected`;
+    $("sel-all").textContent = all && n ? "Select none" : "Select all";
+    $("sel-all").onclick = () => {
+      selected = new Set(all ? [] : f.slides.map((s) => s.name));
+      renderFolder(f);
+    };
+    ["sel-move", "sel-off", "sel-on", "sel-delete"].forEach((id) => { $(id).disabled = !n; });
+    $("sel-move").hidden = lib.formats[fmt].length < 2;
+  }
+
+  // Several slides at once. Leaves select mode when done.
+  async function changeSelected(action, extra, message) {
+    const n = selected.size;
+    const data = await act("POST", `/api/slides/${fmt}/${enc(folder)}`,
+      { names: [...selected], action, ...extra }, message(n === 1 ? "1 slide" : `${n} slides`));
+    if (data) setSelecting(false);
+  }
+
+  // A list of the other folders to move to. Resolves to a folder name, or null.
+  function pickFolder(title) {
+    const dialog = $("pick-dialog"), others = lib.formats[fmt].filter((x) => x.name !== folder);
+    return new Promise((resolve) => {
+      const choose = (name) => { resolve(name); dialog.close(); };
+      const cancel = document.createElement("button");
+      cancel.textContent = "Cancel";
+      cancel.onclick = () => choose(null);
+      $("pick-title").textContent = title;
+      $("pick-list").replaceChildren(...others.map((x) => {
+        const b = document.createElement("button");
+        b.textContent = `Move to ${x.name}`;
+        b.onclick = () => choose(x.name);
+        return b;
+      }), cancel);
+      dialog.addEventListener("close", () => resolve(null), { once: true });  // Esc
+      dialog.showModal();
+    });
   }
 
   function renderStatus() {
@@ -411,30 +507,20 @@
     $("sd-switch").textContent = s.on ? "Turn off (leave out of the slideshow)" : "Turn on (back into the slideshow)";
     const others = lib.formats[fmt].filter((x) => x.name !== f.name);
     $("sd-move").hidden = !others.length;
-    $("sd-actions").hidden = false;
-    $("sd-targets").hidden = true;
     $("sd-show").onclick = () => { close(); act("POST", `/api/show/${enc(f.name)}/${enc(s.name)}`); };
     $("sd-pin").onclick = () => { close(); act("POST", `/api/pin/${enc(f.name)}/${enc(s.name)}`); };
     $("sd-switch").onclick = () => { close(); act("POST", base + "/switch", { on: !s.on },
       `${s.name} ${s.on ? "is left out of" : "is back in"} the slideshow`); };
     $("sd-delete").onclick = () => {
-      if (!confirm(`Delete "${s.name}"?`)) return;
+      if (!confirm(`Are you sure? Delete "${s.name}"? This cannot be undone.`)) return;
       close();
       act("DELETE", base, undefined, `Deleted ${s.name}`);
     };
     $("sd-close").onclick = close;
-    $("sd-move").onclick = () => {
-      const cancel = document.createElement("button");
-      cancel.textContent = "Cancel";
-      cancel.onclick = close;
-      $("sd-targets").replaceChildren(...others.map((x) => {
-        const b = document.createElement("button");
-        b.textContent = `Move to ${x.name}`;
-        b.onclick = () => { close(); act("POST", base + "/move", { to: x.name }, `Moved ${s.name} to ${x.name}`); };
-        return b;
-      }), cancel);
-      $("sd-actions").hidden = true;
-      $("sd-targets").hidden = false;
+    $("sd-move").onclick = async () => {
+      close();
+      const to = await pickFolder(`Move ${s.name} to:`);
+      if (to) act("POST", base + "/move", { to }, `Moved ${s.name} to ${to}`);
     };
     dialog.showModal();
   }
@@ -481,8 +567,24 @@
   $("solo-btn").onclick = () => act("POST", folderUrl(fmt, folder) + "/switch", { on: true, only: true },
     `Only "${folder}" plays now`);
   $("delete-folder-btn").onclick = async () => {
-    if (!confirm(`Delete the empty folder "${folder}"?`)) return;
-    if (await act("DELETE", folderUrl(fmt, folder), undefined, "Folder deleted")) go(fmt);
+    const n = lib.formats[fmt].find((f) => f.name === folder).slides.length;
+    const question = n ? `Are you sure? Delete the folder "${folder}" and all ${n} slide${n === 1 ? "" : "s"} in it? This cannot be undone.`
+      : `Are you sure? Delete the empty folder "${folder}"?`;
+    if (!confirm(question)) return;
+    if (await act("DELETE", folderUrl(fmt, folder) + (n ? "?with_slides=1" : ""), undefined, "Folder deleted")) go(fmt);
+  };
+  $("select-btn").onclick = () => setSelecting(true);
+  $("sel-done").onclick = () => setSelecting(false);
+  $("sel-off").onclick = () => changeSelected("off", {}, (what) => `${what} left out of the slideshow`);
+  $("sel-on").onclick = () => changeSelected("on", {}, (what) => `${what} back in the slideshow`);
+  $("sel-delete").onclick = () => {
+    const n = selected.size;
+    if (!confirm(`Are you sure? Delete ${n} slide${n === 1 ? "" : "s"} from "${folder}"? This cannot be undone.`)) return;
+    changeSelected("delete", {}, (what) => `Deleted ${what}`);
+  };
+  $("sel-move").onclick = async () => {
+    const to = await pickFolder(`Move ${selected.size} slide${selected.size === 1 ? "" : "s"} to:`);
+    if (to) changeSelected("move", { to }, (what) => `Moved ${what} to ${to}`);
   };
   $("upload-btn").onclick = () => $("file-input").click();
   $("file-input").onchange = (e) => { upload(e.target.files); e.target.value = ""; };

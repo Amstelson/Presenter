@@ -442,12 +442,19 @@ def create_folder(fmt):
 @app.delete("/api/folders/<fmt>/<folder>")
 @mutating
 def delete_folder(fmt, folder):
-    try:
-        os.rmdir(folder_path(fmt, folder))
-    except OSError:
-        return jsonify(error="Only empty folders can be deleted. Move or delete its slides first."), 409
+    """Deletes an empty folder; with ?with_slides=1 also a full one, slides and all."""
+    path = folder_path(fmt, folder)
+    if request.args.get("with_slides") == "1":
+        shutil.rmtree(path)
+        shutil.rmtree(os.path.join(THUMB_DIR, fmt, folder), ignore_errors=True)
+    else:
+        try:
+            os.rmdir(path)
+        except OSError:
+            return jsonify(error="The folder is not empty."), 409
     switch(f"{fmt}/{folder}", "folders_off", True)
-    save_state()
+    state["slides_off"] = [k for k in state["slides_off"] if not k.startswith(f"{fmt}/{folder}/")]
+    changed(fmt)
     return jsonify(ok=True)
 
 
@@ -462,9 +469,7 @@ def switch_folder(fmt, folder):
             switch(f"{fmt}/{other}", "folders_off", other == folder)
     else:
         switch(f"{fmt}/{folder}", "folders_off", bool(data.get("on")))
-    save_state()
-    if fmt == FORMAT:
-        sync_player()
+    changed(fmt)
     return jsonify(ok=True)
 
 
@@ -486,47 +491,91 @@ def upload(fmt, folder):
     return jsonify(saved=saved)
 
 
+# Slide changes, used for one slide and for several at once.
+
+def set_slide(fmt, folder, name, on):
+    switch(f"{fmt}/{folder}/{name}", "slides_off", on)
+
+
+def move_slide_file(fmt, folder, name, to):
+    """Moves a slide to folder `to` (keeping it off if it was off). Returns its new name."""
+    if to == folder:
+        return name
+    target = os.path.join(SLIDES_DIR, fmt, to)
+    new_name = unique_name(target, name)
+    os.rename(os.path.join(SLIDES_DIR, fmt, folder, name), os.path.join(target, new_name))
+    drop_thumb(fmt, folder, name)
+    if f"{fmt}/{folder}/{name}" in state["slides_off"]:
+        set_slide(fmt, folder, name, True)
+        set_slide(fmt, to, new_name, False)
+    return new_name
+
+
+def delete_slide_file(fmt, folder, name):
+    os.remove(os.path.join(SLIDES_DIR, fmt, folder, name))
+    drop_thumb(fmt, folder, name)
+    set_slide(fmt, folder, name, True)  # forget that it was off
+
+
+def changed(fmt):
+    """Save the switches and, for this screen's format, update the slideshow."""
+    save_state()
+    if fmt == FORMAT:
+        sync_player()
+
+
 @app.post("/api/slides/<fmt>/<folder>/<name>/switch")
 @mutating
 def switch_slide(fmt, folder, name):
     slide_path(fmt, folder, name)
-    switch(f"{fmt}/{folder}/{name}", "slides_off", bool(body().get("on")))
-    save_state()
-    if fmt == FORMAT:
-        sync_player()
+    set_slide(fmt, folder, name, bool(body().get("on")))
+    changed(fmt)
     return jsonify(ok=True)
 
 
 @app.post("/api/slides/<fmt>/<folder>/<name>/move")
 @mutating
 def move_slide(fmt, folder, name):
-    src = slide_path(fmt, folder, name)
+    slide_path(fmt, folder, name)
     to = str(body().get("to", ""))
-    target = folder_path(fmt, to)
-    if to == folder:
-        return jsonify(ok=True, name=name)
-    new_name = unique_name(target, name)
-    os.rename(src, os.path.join(target, new_name))
-    drop_thumb(fmt, folder, name)
-    if f"{fmt}/{folder}/{name}" in state["slides_off"]:  # a switched-off slide stays off
-        switch(f"{fmt}/{folder}/{name}", "slides_off", True)
-        switch(f"{fmt}/{to}/{new_name}", "slides_off", False)
-    save_state()
-    if fmt == FORMAT:
-        sync_player()
+    folder_path(fmt, to)
+    new_name = move_slide_file(fmt, folder, name, to)
+    changed(fmt)
     return jsonify(ok=True, name=new_name)
 
 
 @app.delete("/api/slides/<fmt>/<folder>/<name>")
 @mutating
 def delete_slide(fmt, folder, name):
-    os.remove(slide_path(fmt, folder, name))
-    drop_thumb(fmt, folder, name)
-    switch(f"{fmt}/{folder}/{name}", "slides_off", True)
-    save_state()
-    if fmt == FORMAT:
-        sync_player()
+    slide_path(fmt, folder, name)
+    delete_slide_file(fmt, folder, name)
+    changed(fmt)
     return jsonify(ok=True)
+
+
+@app.post("/api/slides/<fmt>/<folder>")
+@mutating
+def change_slides(fmt, folder):
+    """Several slides at once: {"names": [...], "action": "delete", "move", "on" or "off",
+    "to": target folder for "move"}. The slideshow is updated once, at the end."""
+    folder_path(fmt, folder)
+    data = body()
+    names, action, to = data.get("names"), data.get("action"), str(data.get("to", ""))
+    if not isinstance(names, list) or action not in ("delete", "move", "on", "off"):
+        return jsonify(error='Needs "names" and an "action": delete, move, on or off'), 400
+    if action == "move":
+        folder_path(fmt, to)  # an unknown target is a 404 before anything is touched
+    present = slides(fmt, folder)
+    done = [n for n in dict.fromkeys(map(str, names)) if n in present]  # gone ones are skipped
+    for name in done:
+        if action == "delete":
+            delete_slide_file(fmt, folder, name)
+        elif action == "move":
+            move_slide_file(fmt, folder, name, to)
+        else:
+            set_slide(fmt, folder, name, action == "on")
+    changed(fmt)
+    return jsonify(done=len(done), skipped=len(names) - len(done))
 
 
 @app.get("/thumb/<fmt>/<folder>/<name>")
