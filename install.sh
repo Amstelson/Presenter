@@ -36,14 +36,17 @@ for icon in presenter-start presenter-stop; do
 done
 
 if [ ! -f "$ENV_FILE" ]; then
-    printf "Choose a password for the web page (leave empty for a random one): "
+    printf "Password for the web page (leave empty for no login, e.g. on a closed staff network): "
     stty -echo 2>/dev/null || true
     read -r password || true
     stty echo 2>/dev/null || true
     echo
-    [ -n "$password" ] || password=$(python3 -c "import secrets; print(secrets.token_urlsafe(9))")
     (umask 077 && printf 'PRESENTER_USER=cinema\nPRESENTER_PASSWORD=%s\n' "$password" > "$ENV_FILE")
-    echo "Web login: cinema / $password  (change it in $ENV_FILE)"
+    if [ -n "$password" ]; then
+        echo "Web login: cinema / $password  (change it in $ENV_FILE)"
+    else
+        echo "The web page has no login. To add one later, set PRESENTER_PASSWORD in $ENV_FILE"
+    fi
 fi
 
 # The screen format of this Pi decides which slides folder it plays.

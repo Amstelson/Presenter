@@ -22,7 +22,7 @@ The web page lets staff:
 - tap a slide to **show it now**, **show only this** one until told otherwise (**Resume slideshow** goes back), **move** it to another folder, or delete it
 - upload images (JPG, PNG, WebP, GIF, up to 50 MB each) into a folder
 
-It works offline on the LAN (no CDN, no internet needed) and is protected by a username and password.
+It works offline on the LAN (no CDN, no internet needed). A login is optional: leave it off on a closed staff network, or set a password if guests share the network.
 
 ## What you need
 
@@ -39,7 +39,7 @@ It works offline on the LAN (no CDN, no internet needed) and is protected by a u
 
    If the repository is private, either sign in with a GitHub token, or download the ZIP from GitHub and copy the folder over with a USB stick or `scp`.
 
-2. Run the installer **as the normal desktop user** (not with sudo). It asks for the web password and whether this Pi's screen is **flat** or **scope**:
+2. Run the installer **as the normal desktop user** (not with sudo). It asks for a web password (leave it empty for no login) and whether this Pi's screen is **flat** or **scope**:
 
    ```sh
    cd ~/presenter
@@ -67,8 +67,8 @@ mkdir -p ~/slides/flat ~/slides/scope ~/.config/systemd/user ~/.config/autostart
 cp ~/presenter/systemd/*.service ~/.config/systemd/user/
 cp ~/presenter/autostart/presenter-mpv.desktop ~/.config/autostart/
 
-# 3. Login for the web page, and this screen's format (flat or scope)
-printf 'PRESENTER_USER=cinema\nPRESENTER_PASSWORD=pick-a-password\nPRESENTER_FORMAT=flat\n' > ~/.config/presenter.env
+# 3. This screen's format (flat or scope), and a web password if you want a login
+printf 'PRESENTER_FORMAT=flat\nPRESENTER_PASSWORD=\n' > ~/.config/presenter.env
 chmod 600 ~/.config/presenter.env
 
 # 4. Start the web app at boot (linger = user services start without a login)
@@ -216,8 +216,8 @@ Edit `~/.config/presenter.env`, then restart both services with `systemctl --use
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `PRESENTER_USER` | `cinema` | web login name |
-| `PRESENTER_PASSWORD` | `change-me` | web password (the installer sets one) |
+| `PRESENTER_PASSWORD` | empty | web password; empty means no login |
+| `PRESENTER_USER` | `cinema` | web login name, used only when a password is set |
 | `PRESENTER_FORMAT` | `flat` | this Pi's screen: `flat` or `scope` (anything else stops the slideshow) |
 | `PRESENTER_SLIDES` | `~/slides` (`/home/pi/slides` for user pi) | folder holding `flat/` and `scope/` |
 | `PRESENTER_HDMI_MODE` | not set | force the HDMI signal, e.g. `2048x1080@24` (see "Forcing the HDMI signal") |
@@ -228,13 +228,15 @@ Edit `~/.config/presenter.env`, then restart both services with `systemctl --use
 
 The same defaults are at the top of `app.py`, along with the upload limit (`MAX_UPLOAD_MB`), the minimum free disk space (`MIN_FREE_MB`) and the thumbnail size.
 
-**Security note:** basic auth over plain HTTP is enough to keep guests on a shared network out of the page. However, the password is not encrypted on the wire, so use one that is not used anywhere else. If the router can isolate guest Wi-Fi from staff devices, turn that on too.
+**Login and security.** Without `PRESENTER_PASSWORD`, anyone who can reach the Pi on the network can use the web page, so keep it on a network that only staff can join. Either way, other websites open in a staff member's browser cannot send commands to the Pi: the page marks its own requests, and the app refuses everything else.
+
+To turn the login on (for example if guests share the network), set `PRESENTER_PASSWORD=something` in `~/.config/presenter.env` and run `systemctl --user restart presenter-web` (or use Start Presenter). The browser then asks for the user name (`cinema`) and password once. The password is sent unencrypted over plain HTTP, so use one that is not used anywhere else.
 
 ## Testing
 
 ### 1. Automated tests (any Debian or Ubuntu machine, about 2 minutes)
 
-The tests start a real mpv without a screen (`--vo=null`) and drive every button through the web API. They cover login, the cross-site request block, next/prev/pause, "only this", resume, upload (filename cleanup, wrong file types, size limit), delete, thumbnails, the exact Flat and Scope frames, keeping the two formats apart, folders (creating, switching, playing only one, deleting), switching slides off without disturbing the screen, moving slides, shuffle, seconds per slide, files copied in without the page, several slides at once (move, switch, delete), deleting a folder with its slides, everything coming back after an mpv restart, and mpv being down. The `presenter.sh` tests check what Start and Stop do, including the "Are you sure?" question and staying off after a reboot. The HDMI tests switch modes on a headless labwc (Wayland) and an Xorg dummy display (X11): trying and switching back, keeping a mode, and setting it again after a change.
+The tests start a real mpv without a screen (`--vo=null`) and drive every button through the web API. They cover the login (with and without a password), the block on commands from other websites, next/prev/pause, "only this", resume, upload (filename cleanup, wrong file types, size limit), delete, thumbnails, the exact Flat and Scope frames, keeping the two formats apart, folders (creating, switching, playing only one, deleting), switching slides off without disturbing the screen, moving slides, shuffle, seconds per slide, files copied in without the page, several slides at once (move, switch, delete), deleting a folder with its slides, everything coming back after an mpv restart, and mpv being down. The `presenter.sh` tests check what Start and Stop do, including the "Are you sure?" question and staying off after a reboot. The HDMI tests switch modes on a headless labwc (Wayland) and an Xorg dummy display (X11): trying and switching back, keeping a mode, and setting it again after a change.
 
 ```sh
 sudo apt install mpv python3-flask python3-pil python3-pytest
@@ -288,7 +290,7 @@ Checklist (use the same one on the Pi):
 - [ ] `pkill mpv`: the slideshow is back in about 3 seconds.
 - [ ] `pkill -f presenter/app.py`: the page works again in about 3 seconds.
 - [ ] Proxmox **Stop** (a hard power off, like a power cut), then **Start**: everything returns on its own.
-- [ ] A browser without the password only gets a login prompt.
+- [ ] With a password set: a browser without it only gets a login prompt. Without one: the page opens straight away.
 
 What the VM cannot tell you: the Pi's GPU speed and limits, and whether Raspberry Pi OS runs the autostart entry. So after the VM run, do the checklist once more on the Pi itself.
 

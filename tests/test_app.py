@@ -162,6 +162,15 @@ def test_posts_need_page_header(env):
     assert client.post("/api/player/next", headers=AUTH).status_code == 400
 
 
+def test_no_login_without_a_password(env, monkeypatch):
+    app, client, _, _ = env
+    monkeypatch.setattr(app, "PASSWORD", "")
+    assert client.get("/").status_code == 200
+    assert client.get("/api/library").status_code == 200
+    assert client.post("/api/player/play").status_code == 400  # other websites are still blocked
+    assert client.post("/api/player/play", headers={"X-Requested-With": "presenter"}).status_code == 200
+
+
 def test_library_lists_folders_and_tidies_loose_images(env):
     _, client, slides, _ = env
     lib = library(client)
@@ -488,6 +497,17 @@ def test_player_down_is_reported_but_files_still_work(env):
     assert client.get("/api/library", headers=AUTH).status_code == 200
     assert upload(client, "flat", "Kids", make_image(), "while-down.jpg").status_code == 200
     assert post(client, "/api/slides/flat/Kids/while-down.jpg/switch", {"on": False}).status_code == 200
+
+
+def test_no_password_is_the_default(env, monkeypatch):
+    import app
+    monkeypatch.delenv("PRESENTER_PASSWORD")
+    try:
+        importlib.reload(app)
+        assert app.PASSWORD == ""
+    finally:
+        monkeypatch.setenv("PRESENTER_PASSWORD", "secret")
+        importlib.reload(app)
 
 
 def test_invalid_format_is_refused(env, monkeypatch):

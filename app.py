@@ -32,7 +32,7 @@ except ImportError:  # no Pillow: thumbnails fall back to the full image
 SLIDES_DIR = os.path.abspath(os.path.expanduser(os.environ.get("PRESENTER_SLIDES", "~/slides")))
 MPV_SOCKET = os.environ.get("PRESENTER_SOCKET", "/tmp/mpv.sock")
 USERNAME = os.environ.get("PRESENTER_USER", "cinema")
-PASSWORD = os.environ.get("PRESENTER_PASSWORD", "change-me")
+PASSWORD = os.environ.get("PRESENTER_PASSWORD", "")  # empty: no login, for a closed staff network
 PORT = int(os.environ.get("PRESENTER_PORT", "8888"))
 DEFAULT_DURATION = float(os.environ.get("PRESENTER_DURATION", "10"))  # seconds per slide
 MAX_UPLOAD_MB = 50
@@ -307,11 +307,12 @@ def mutating(view):
 
 @app.before_request
 def require_login():
-    auth = request.authorization
-    given = f"{auth.username}:{auth.password}" if auth else ""
-    if not hmac.compare_digest(given.encode(), f"{USERNAME}:{PASSWORD}".encode()):
-        return Response("Login required\n", 401, {"WWW-Authenticate": 'Basic realm="Presenter"'})
-    # Only our own page sends this header, which blocks cross-site form posts.
+    if PASSWORD:
+        auth = request.authorization
+        given = f"{auth.username}:{auth.password}" if auth else ""
+        if not hmac.compare_digest(given.encode(), f"{USERNAME}:{PASSWORD}".encode()):
+            return Response("Login required\n", 401, {"WWW-Authenticate": 'Basic realm="Presenter"'})
+    # Only our own page sends this header, so other websites cannot send commands.
     if request.method not in ("GET", "HEAD") and request.headers.get("X-Requested-With") != "presenter":
         abort(400)
 
@@ -606,8 +607,8 @@ with suppress(OSError):  # the files mpv starts with, in case they are missing o
     write_playlist_file(playlist_paths())
 
 if __name__ == "__main__":
-    if PASSWORD == "change-me":
-        print("WARNING: default password in use, set PRESENTER_PASSWORD (see README)")
+    if not PASSWORD:
+        print("No login on the web page (PRESENTER_PASSWORD is not set)")
     threading.Thread(target=watch_library, daemon=True).start()
     try:
         from waitress import serve
