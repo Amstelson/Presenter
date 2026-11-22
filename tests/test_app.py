@@ -11,6 +11,7 @@ import os
 import re
 import shutil
 import socket
+import struct
 import subprocess
 import sys
 import time
@@ -41,7 +42,7 @@ def make_image(fmt="JPEG", size=(1998, 1080)):
 def mpv_args(sock, fmt, *files, extra=()):
     """The mpv options of the systemd service, minus the screen."""
     return ["mpv", "--vo=null", "--no-audio", "--idle=yes", "--no-terminal", "--loop-playlist=inf",
-            "--image-display-duration=300", f"--input-ipc-server={sock}",
+            "--image-display-duration=300", f"--input-ipc-server={sock}", "--no-input-default-bindings",
             f"--include={REPO}/mpv/formats.conf", f"--profile={fmt}", *extra, *map(str, files)]
 
 
@@ -301,6 +302,137 @@ def test_folder_switch_and_play_only_one_folder(env):
     for folder in ("General", "Kids"):
         post(client, f"/api/folders/flat/{folder}/switch", {"on": True})
     assert sorted(playing(app)) == sorted(ALL_FLAT)
+
+
+def test_present_a_folder(env):
+    app, client, _, _ = env
+    post(client, "/api/folders/flat/Kids/switch", {"on": False})  # can be off in the slideshow
+    assert post(client, "/api/present/Kids").status_code == 200
+    state = wait_for(client, presenting=True, paused=True, current=at("Kids", "slide2.jpg"))
+    assert (state["position"], state["count"]) == (1, 2)
+    assert playing(app) == ["Kids/slide2.jpg", "Kids/slide10.jpg"]  # only this folder, in order
+    post(client, "/api/player/next")
+    wait_for(client, current=at("Kids", "slide10.jpg"), position=2)
+    post(client, "/api/player/next")  # at the last slide: stays, does not start over
+    time.sleep(0.4)
+    assert status(client)["current"] == at("Kids", "slide10.jpg")
+    post(client, "/api/player/prev")
+    post(client, "/api/player/prev")  # at the first slide: stays
+    wait_for(client, current=at("Kids", "slide2.jpg"))
+    time.sleep(0.4)
+    assert status(client)["current"] == at("Kids", "slide2.jpg") and status(client)["paused"]
+
+
+def test_presentation_is_left_alone_by_slideshow_changes(env):
+    app, client, _, _ = env
+    post(client, "/api/slides/flat/Coming soon/B.png/switch", {"on": False})
+    assert playing(app) == ["Kids/slide2.jpg", "Kids/slide10.jpg"]  # the presentation goes on
+    assert "Coming soon/B.png" not in playlist_file(app)  # the slideshow is updated for later
+    post(client, "/api/slides/flat/Coming soon/B.png/switch", {"on": True})
+    assert status(client)["presenting"]
+
+
+def test_present_from_a_slide_and_jump_within(env):
+    app, client, _, _ = env
+    post(client, "/api/present/Kids", {"start": "slide10.jpg"})
+    wait_for(client, presenting=True, current=at("Kids", "slide10.jpg"), position=2)
+    assert playing(app) == ["Kids/slide2.jpg", "Kids/slide10.jpg"]
+    post(client, "/api/show/Kids/slide2.jpg")  # Show now jumps within the presentation
+    wait_for(client, presenting=True, paused=True, current=at("Kids", "slide2.jpg"))
+
+
+def test_resume_ends_the_presentation(env):
+    app, client, _, _ = env
+    post(client, "/api/resume")
+    wait_for(client, presenting=False, paused=False)
+    assert app.mpv(["get_property", "loop-playlist"])[0] == "inf"
+    eventually(lambda: sorted(playing(app)) == sorted(p for p in ALL_FLAT if not p.startswith("Kids/")),
+               "the slideshow, still without the switched-off Kids folder")
+    post(client, "/api/folders/flat/Kids/switch", {"on": True})
+    assert sorted(playing(app)) == sorted(ALL_FLAT)
+
+
+def test_presentation_details(env):
+    app, client, _, _ = env
+    assert post(client, "/api/present/Nope").status_code == 404
+    post(client, "/api/folders/flat", {"name": "Empty"})
+    assert post(client, "/api/present/Empty").status_code == 409
+    client.delete("/api/folders/flat/Empty", headers=POST)
+    post(client, "/api/slides/flat/Coming soon/a.jpg/switch", {"on": False})
+    post(client, "/api/present/Coming soon")  # switched-off slides are left out
+    wait_for(client, presenting=True, current=at("Coming soon", "B.png"))
+    assert playing(app) == ["Coming soon/B.png"]
+    post(client, "/api/slides/flat/Coming soon/a.jpg/switch", {"on": True})
+    post(client, "/api/pin/Kids/slide2.jpg")  # Only this ends the presentation
+    wait_for(client, presenting=False, pinned=True, current=at("Kids", "slide2.jpg"))
+    post(client, "/api/resume")
+    wait_for(client, presenting=False, pinned=False, paused=False)
+
+
+def key_bitmap(codes):
+    """A key capability bitmap as Linux shows it in sysfs: hex words, highest first."""
+    bits, digits = sum(1 << c for c in codes), struct.calcsize("l") * 2
+    words = []
+    while bits:
+        words.append(f"{bits & ((1 << digits * 4) - 1):x}")
+        bits >>= digits * 4
+    return " ".join(reversed(words)) or "0"
+
+
+def key_events(*keys):
+    """Input events as a device sends them: (code, value) pairs, value 1 = press."""
+    return b"".join(struct.pack("llHHi", 0, 0, 1, code, value) for code, value in keys)
+
+
+def fake_device(app, tmp_path, name, keys, events=b""):
+    (tmp_path / "dev").mkdir(exist_ok=True)
+    (tmp_path / "sys" / name / "device" / "capabilities").mkdir(parents=True)
+    (tmp_path / "sys" / name / "device" / "capabilities" / "key").write_text(key_bitmap(keys) + "\n")
+    (tmp_path / "dev" / name).write_bytes(events)
+    app.INPUT_DIR, app.INPUT_SYS = str(tmp_path / "dev"), str(tmp_path / "sys")
+    return str(tmp_path / "dev" / name)
+
+
+def test_finds_clickers_and_keyboards_but_not_mice(env, tmp_path, monkeypatch):
+    app = env[0]
+    monkeypatch.setattr(app, "INPUT_DIR", app.INPUT_DIR)
+    monkeypatch.setattr(app, "INPUT_SYS", app.INPUT_SYS)
+    fake_device(app, tmp_path, "event0", {272, 273})  # a mouse: left and right button
+    clicker = fake_device(app, tmp_path, "event1", {104, 109, 63, 1, 52})  # Page Up/Down, F5, Esc, .
+    keyboard = fake_device(app, tmp_path, "event2", set(range(1, 128)))
+    fake_device(app, tmp_path, "event3", {113, 114, 115})  # volume keys only
+    assert app.clicker_devices() == [clicker, keyboard]
+
+
+def test_one_press_is_one_step(env):
+    app = env[0]
+    events = key_events((109, 1), (109, 2), (109, 2), (109, 0),  # Page Down pressed, held, let go
+                        (103, 1), (30, 1), (1, 1))  # Up, then "a" and Esc (not clicker keys)
+    events += struct.pack("llHHi", 0, 0, 0, 0, 0)  # a sync event
+    assert app.pressed(events) == ["next", "prev"]
+
+
+def test_clicker_moves_the_slides(env, tmp_path, monkeypatch):
+    app, client, _, _ = env
+    monkeypatch.setattr(app, "INPUT_DIR", app.INPUT_DIR)
+    monkeypatch.setattr(app, "INPUT_SYS", app.INPUT_SYS)
+    post(client, "/api/show/Coming soon/a.jpg")
+    wait_for(client, current=at("Coming soon", "a.jpg"))
+    clicker = fake_device(app, tmp_path, "event4", {104, 109}, key_events((109, 1), (109, 0)))
+    devices = {}
+    app.poll_clickers(devices, timeout=1)  # reads the Page Down press
+    wait_for(client, current=at("Coming soon", "B.png"))
+    app.poll_clickers(devices, timeout=1)  # nothing more to read: like the clicker unplugged
+    assert clicker not in devices
+    post(client, "/api/pin/Coming soon/B.png")
+    wait_for(client, pinned=True)
+    with open(clicker, "wb") as f:
+        f.write(key_events((109, 1)))
+    app.poll_clickers({}, timeout=1)  # "Only this" ignores the clicker, like the page's buttons
+    time.sleep(0.4)
+    assert status(client)["current"] == at("Coming soon", "B.png")
+    post(client, "/api/resume")
+    wait_for(client, pinned=False, paused=False)
 
 
 def test_shuffle(env):

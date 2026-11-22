@@ -74,6 +74,9 @@ rm -f "$HOME/.config/presenter/mpv.conf"  # format file of an earlier version, n
 # Installing means it should run: undo an earlier Stop Presenter.
 rm -f "$HOME/.config/presenter/stopped"
 
+# Reading a presentation clicker (a USB keyboard to the Pi) needs the input group.
+sudo usermod -aG input "$(id -un)"
+
 # Start the user's services at boot, even before the desktop logs in.
 sudo loginctl enable-linger "$(id -un)"
 systemctl --user daemon-reload

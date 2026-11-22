@@ -8,13 +8,16 @@ Slides live in <slides>/<format>/<folder>/<image>, where <format> is flat or
 scope. A Pi shows only its own format: every slide that is switched on, in a
 folder that is switched on, in order or shuffled.
 """
+import glob
 import hmac
 import json
 import os
 import random
 import re
+import select
 import shutil
 import socket
+import struct
 import threading
 import time
 from contextlib import suppress
@@ -99,9 +102,17 @@ def mpv(*commands):
 
 
 def player_state():
-    paused, loop, path = mpv(["get_property", "pause"], ["get_property", "loop-file"],
-                             ["get_property", "path"])
-    return {"paused": bool(paused), "pinned": loop == "inf", "path": path}
+    paused, loop, loop_list, path, pos, count = mpv(
+        ["get_property", "pause"], ["get_property", "loop-file"], ["get_property", "loop-playlist"],
+        ["get_property", "path"], ["get_property", "playlist-pos"], ["get_property", "playlist-count"])
+    return {"paused": bool(paused), "pinned": loop == "inf",
+            "presenting": loop_list is False,  # a presentation does not start over at the end
+            "path": path, "position": (pos or 0) + 1, "count": count or 0}
+
+
+# Back to the normal slideshow's player settings, out of "Only this" or a presentation.
+NORMAL_MODE = [["set_property", "loop-file", "no"], ["set_property", "loop-playlist", "inf"],
+               ["set_property", "keep-open", "no"]]
 
 
 def mpv_playlist():
@@ -250,9 +261,11 @@ def sync_player():
     write_playlist_file(paths)
     with suppress(MpvError):  # if mpv is down it reads the playlist file when it starts
         state_now = player_state()
+        if state_now["presenting"]:
+            return  # a presentation keeps going, Resume slideshow brings the new slideshow
         if state_now["pinned"] and state_now["path"] and os.path.exists(state_now["path"]):
             return  # "Only this" stays on screen, Resume brings the new slideshow
-        mpv(["set_property", "loop-file", "no"])
+        mpv(*NORMAL_MODE)
         load_playlist(paths)
 
 
@@ -269,6 +282,75 @@ def watch_library():
         time.sleep(30)
         with suppress(Exception):  # e.g. a folder deleted halfway through a check
             pick_up_outside_changes()
+
+
+# --- Presentation clickers ---
+# A clicker (like a Logitech presenter with a USB dongle) is a keyboard to the Pi. These keys,
+# from any keyboard plugged into the Pi, move the slides whichever window has the keyboard focus.
+CLICKER_KEYS = {109: "next", 106: "next", 108: "next",  # Page Down, Right, Down
+                104: "prev", 105: "prev", 103: "prev"}  # Page Up, Left, Up
+INPUT_DIR, INPUT_SYS = "/dev/input", "/sys/class/input"
+EVENT = struct.Struct("llHHi")  # Linux struct input_event: time (two longs), type, code, value
+EV_KEY, KEY_PRESSED = 1, 1  # value 2 is a held key repeating: skipped, one press is one step
+unreadable = set()  # devices we were not allowed to open, reported once
+
+
+def clicker_devices():
+    """Input devices that have any of the clicker keys (keyboards, clickers, not mice)."""
+    found, digits = [], struct.calcsize("l") * 2  # hex digits per word of the key bitmap
+    for path in sorted(glob.glob(os.path.join(INPUT_DIR, "event*"))):
+        with suppress(OSError, ValueError):
+            with open(os.path.join(INPUT_SYS, os.path.basename(path), "device/capabilities/key")) as f:
+                keys = int("".join(w.zfill(digits) for w in f.read().split()) or "0", 16)
+            if any(keys >> code & 1 for code in CLICKER_KEYS):
+                found.append(path)
+    return found
+
+
+def pressed(data):
+    """The clicker actions ("next", "prev") in input events read from a device."""
+    events = (EVENT.unpack_from(data, i) for i in range(0, len(data) - EVENT.size + 1, EVENT.size))
+    return [CLICKER_KEYS[code] for _, _, kind, code, value in events
+            if kind == EV_KEY and value == KEY_PRESSED and code in CLICKER_KEYS]
+
+
+def poll_clickers(devices, timeout=3):
+    """One round: open newly plugged-in clickers, then act on key presses for up to `timeout` s."""
+    for path in clicker_devices():
+        if path not in devices:
+            try:
+                devices[path] = open(path, "rb", buffering=0)
+            except PermissionError:
+                if path not in unreadable:
+                    unreadable.add(path)
+                    print(f"Cannot read {path}: add this user to the input group (see README)", flush=True)
+            except OSError:
+                pass
+    if not devices:
+        time.sleep(timeout)
+        return
+    for device in select.select(list(devices.values()), [], [], timeout)[0]:
+        try:
+            data = device.read(EVENT.size * 64)
+        except OSError:
+            data = b""
+        if not data:  # unplugged
+            device.close()
+            del devices[next(p for p, d in devices.items() if d is device)]
+            continue
+        for action in pressed(data):
+            with suppress(MpvError):
+                clicker_pressed(action)
+
+
+def watch_clickers():
+    devices = {}
+    while True:
+        try:
+            poll_clickers(devices)
+        except Exception as e:  # keep listening whatever happens
+            print(f"Clicker: {e}", flush=True)
+            time.sleep(3)
 
 
 def where(path):
@@ -353,7 +435,8 @@ def library():
 def status():
     state_now = player_state()
     return jsonify(paused=state_now["paused"], pinned=state_now["pinned"],
-                   current=where(state_now["path"]))
+                   presenting=state_now["presenting"], position=state_now["position"],
+                   count=state_now["count"], current=where(state_now["path"]))
 
 
 @app.post("/api/settings")
@@ -394,18 +477,24 @@ def player(action):
     return jsonify(ok=True)
 
 
+def clicker_pressed(action):
+    """Next or previous from a presentation clicker: like the buttons on the page."""
+    if not player_state()["pinned"]:  # Next and Previous are off in "Only this" mode
+        mpv(PLAYER_ACTIONS[action])
+
+
 @app.post("/api/show/<folder>/<name>")
 @mutating
 def show(folder, name):
     path = slide_path(FORMAT, folder, name)
     playing = mpv_playlist()
-    if not player_state()["pinned"] and path in playing:
+    if not player_state()["pinned"] and path in playing:  # also jumps within a presentation
         mpv(["playlist-play-index", playing.index(path)])
         return jsonify(ok=True)
     paths = playlist_paths()
     if path not in paths:
         return jsonify(error="This slide is not in the slideshow: it or its folder is switched off."), 409
-    mpv(["set_property", "loop-file", "no"])
+    mpv(*NORMAL_MODE)
     load_playlist(paths, start=path)
     return jsonify(ok=True)
 
@@ -413,14 +502,39 @@ def show(folder, name):
 @app.post("/api/pin/<folder>/<name>")
 @mutating
 def pin(folder, name):
-    mpv(["set_property", "loop-file", "inf"], ["loadfile", slide_path(FORMAT, folder, name), "replace"])
+    path = slide_path(FORMAT, folder, name)
+    mpv(*NORMAL_MODE, ["set_property", "loop-file", "inf"], ["loadfile", path, "replace"])
+    return jsonify(ok=True)
+
+
+@app.post("/api/present/<folder>")
+@mutating
+def present(folder):
+    """Present a folder: its switched-on slides in order, paused, one step at a time
+    (Next, Previous or a clicker), not starting over at the end. Also works for a folder
+    that is switched off in the slideshow. {"start": name} starts at that slide.
+    Leaves the slideshow settings alone: Resume slideshow goes back to it."""
+    folder_path(FORMAT, folder)
+    names = [n for n in slides(FORMAT, folder) if f"{FORMAT}/{folder}/{n}" not in state["slides_off"]]
+    if not names:
+        return jsonify(error="This folder has no switched-on slides to present."), 409
+    start = str(body().get("start", ""))
+    i = names.index(start) if start in names else 0
+    paths = [os.path.join(PLAY_DIR, folder, n) for n in names]
+    # The start slide goes on screen first and is moved to its place, so slide 1 never flashes up.
+    first = (["playlist-clear"] if mpv(["get_property", "path"])[0] == paths[i]
+             else ["loadfile", paths[i], "replace"])
+    mpv(["set_property", "pause", True], ["set_property", "loop-file", "no"],
+        ["set_property", "loop-playlist", "no"], ["set_property", "keep-open", "yes"], first,
+        *(["loadfile", p, "append"] for p in paths[:i] + paths[i + 1:]), ["playlist-move", 0, i + 1])
     return jsonify(ok=True)
 
 
 @app.post("/api/resume")
 @mutating
 def resume():
-    mpv(["set_property", "loop-file", "no"], ["set_property", "pause", False])
+    """Back to the slideshow, from "Only this" or a presentation."""
+    mpv(*NORMAL_MODE, ["set_property", "pause", False])
     sync_player()  # continues from the image on screen
     return jsonify(ok=True)
 
@@ -610,6 +724,7 @@ if __name__ == "__main__":
     if not PASSWORD:
         print("No login on the web page (PRESENTER_PASSWORD is not set)")
     threading.Thread(target=watch_library, daemon=True).start()
+    threading.Thread(target=watch_clickers, daemon=True).start()
     try:
         from waitress import serve
     except ImportError:

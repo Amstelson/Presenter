@@ -21,6 +21,7 @@ The web page lets staff:
 - switch single slides **off** for a while (for example once their event is over) and back on
 - tap a slide to **show it now**, **show only this** one until told otherwise (**Resume slideshow** goes back), **move** it to another folder, or delete it
 - upload images (JPG, PNG, WebP, GIF, up to 50 MB each) into a folder
+- **present** a folder like a slide deck: one slide at a time, moved on by hand or with a wireless **presentation clicker**
 
 It works offline on the LAN (no CDN, no internet needed). A login is optional: leave it off on a closed staff network, or set a password if guests share the network.
 
@@ -126,6 +127,26 @@ On Xfce, the first double-click may warn about an "untrusted application launche
 - The screen keeps showing the current slide while you change things around it, so switching and moving do not make it flicker. If you switch off the slide on screen, the next one follows.
 - Everything is remembered across restarts and power cuts, in `~/.config/presenter/` on the Pi (`state.json` for the switches and settings, `playlist.m3u8` and `player.conf` for mpv).
 - **Copying files in without the web page** (over the network or from a USB stick) works too: put them into a folder, and they join the slideshow within 30 seconds. Images put directly into `~/slides/flat` or `~/slides/scope`, outside any folder, are moved into the folder "General".
+
+## Presenting with a clicker
+
+Presenter can also run a talk or event as a simple slide deck:
+
+1. Put the slides into a folder and name them in order: `01 Welcome.jpg`, `02 Programme.jpg`, and so on. The folder can be switched off, so it stays out of the normal slideshow.
+2. On the web page, open the folder and tap **Present this folder**. To start in the middle, tap a slide and choose **Present this folder from this slide**.
+3. The screen shows the first slide and waits. The clicker's forward and back buttons, or **Next** and **Previous** on the page, move one slide at a time. At the last slide it stays there, it does not start over. A banner on the page shows "slide 3 of 12".
+4. **End presentation** goes back to the normal slideshow, exactly as it was. Shuffle, the folder switches and the seconds per slide are not changed by presenting.
+
+**The clicker.** A wireless presenter such as a Logitech R400 or R500 is a small keyboard to the Pi. Just plug its USB dongle into the Pi. Presenter reads these keys from any keyboard or clicker plugged into the Pi, whichever window is in front:
+
+| Keys | Do |
+|---|---|
+| Page Down, Right arrow, Down arrow | next slide |
+| Page Up, Left arrow, Up arrow | previous slide |
+
+They work the same way in the normal slideshow (next and previous slide), but not in "Only this" mode. Holding a button down still moves only one slide. The clicker's other buttons (start presentation, black screen) do nothing. mpv's own keyboard shortcuts are switched off, so no key can take the slideshow out of fullscreen.
+
+Reading the clicker needs the Pi user in the `input` group. Raspberry Pi OS sets this up for the first user, and `install.sh` adds it as well (it takes effect after a reboot).
 
 ## Flat and Scope screens
 
@@ -236,7 +257,7 @@ To turn the login on (for example if guests share the network), set `PRESENTER_P
 
 ### 1. Automated tests (any Debian or Ubuntu machine, about 2 minutes)
 
-The tests start a real mpv without a screen (`--vo=null`) and drive every button through the web API. They cover the login (with and without a password), the block on commands from other websites, next/prev/pause, "only this", resume, upload (filename cleanup, wrong file types, size limit), delete, thumbnails, the exact Flat and Scope frames, keeping the two formats apart, folders (creating, switching, playing only one, deleting), switching slides off without disturbing the screen, moving slides, shuffle, seconds per slide, files copied in without the page, several slides at once (move, switch, delete), deleting a folder with its slides, everything coming back after an mpv restart, and mpv being down. The `presenter.sh` tests check what Start and Stop do, including the "Are you sure?" question and staying off after a reboot. The HDMI tests switch modes on a headless labwc (Wayland) and an Xorg dummy display (X11): trying and switching back, keeping a mode, and setting it again after a change.
+The tests start a real mpv without a screen (`--vo=null`) and drive every button through the web API. They cover the login (with and without a password), the block on commands from other websites, next/prev/pause, "only this", resume, upload (filename cleanup, wrong file types, size limit), delete, thumbnails, the exact Flat and Scope frames, keeping the two formats apart, folders (creating, switching, playing only one, deleting), switching slides off without disturbing the screen, moving slides, shuffle, seconds per slide, files copied in without the page, several slides at once (move, switch, delete), deleting a folder with its slides, presenting a folder (order, start slide, staying at the ends, leaving the slideshow untouched), the clicker (finding it, one step per press, ignored in "Only this"), everything coming back after an mpv restart, and mpv being down. The `presenter.sh` tests check what Start and Stop do, including the "Are you sure?" question and staying off after a reboot. The HDMI tests switch modes on a headless labwc (Wayland) and an Xorg dummy display (X11): trying and switching back, keeping a mode, and setting it again after a change.
 
 ```sh
 sudo apt install mpv python3-flask python3-pil python3-pytest
@@ -282,6 +303,7 @@ Checklist (use the same one on the Pi):
 - [ ] The screen shows only the slides of its own format, in the right frame. Uploading to the other tab changes nothing on screen.
 - [ ] Folders: create one, upload into it, switch it off and on, Play only this folder. Move a slide between folders.
 - [ ] Select several slides: move them, turn them off and on, delete them (answer "no" once to the question). Delete a folder with slides in it.
+- [ ] Present a folder: it starts at slide 1 and waits. The clicker (or Next and Previous) moves one slide per press, and stays put at the first and last slide. End presentation brings back the slideshow as it was. Plug the clicker in while the slideshow runs: it works within a few seconds.
 - [ ] Stop Presenter, reboot: nothing starts. Start Presenter: slideshow and web page are back, and come back after the next reboot too.
 - [ ] Switching a slide off removes it from the slideshow without a flicker. Seconds per slide and Shuffle take effect at once.
 - [ ] After a reboot, switched-off folders and slides, shuffle and seconds per slide are as you left them.
@@ -311,6 +333,7 @@ journalctl --user -u presenter-web -n 50              # web app log
   ```
 
 - **Black screen, mpv log says "Unknown profile":** `PRESENTER_FORMAT` in `~/.config/presenter.env` must be exactly `flat` or `scope`.
+- **The clicker does nothing:** check that the Pi user is in the `input` group with `groups` (if not: `sudo usermod -aG input $USER` and reboot), and look for "Cannot read" in `journalctl --user -u presenter-web -n 20`. Clickers that send other keys than the ones in the table under "Presenting with a clicker" need an entry in `CLICKER_KEYS` at the top of the clicker part of `app.py`.
 - **Black screen after setting `PRESENTER_HDMI_MODE`:** the projector does not accept that signal. Over SSH, remove the line from `~/.config/presenter.env` and reboot. Use `./hdmi_mode.py try` first next time.
 - **Talk to mpv directly** (needs `sudo apt install socat`):
 
